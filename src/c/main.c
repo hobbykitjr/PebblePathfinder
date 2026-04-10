@@ -202,7 +202,7 @@ static void draw_info(GContext *ctx, GRect b, float dist_m, const char *name,
     // Round: 4 small circle bubbles in each quadrant of the compass
     int cx=w/2, cy=h/2;
     int qr = 28;   // Bubble radius
-    int qd = 52;   // Distance from center to bubble center
+    int qd = 46;   // Distance from center to bubble center (closer in)
     // Top-left: date
     int q1x=cx-qd, q1y=cy-qd;
     graphics_context_set_fill_color(ctx, GColorBlack);
@@ -234,14 +234,24 @@ static void draw_info(GContext *ctx, GRect b, float dist_m, const char *name,
       graphics_draw_text(ctx, name, f_sm,
         GRect(q3x-qr+4,q3y-12,qr*2-8,28), GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
 
-      // Bottom-right: distance
+      // Bottom-right: distance (number + unit on 2 lines)
       int q4x=cx+qd, q4y=cy+qd;
       graphics_context_set_fill_color(ctx, GColorBlack);
       graphics_fill_circle(ctx, GPoint(q4x,q4y), qr);
-      char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
       graphics_context_set_text_color(ctx, text_c);
-      graphics_draw_text(ctx, dbuf, f_md,
-        GRect(q4x-qr+2,q4y-10,qr*2-4,22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+      // Split distance: number on line 1, unit on line 2
+      char dnum[12], dunit[4];
+      if(s_unit == UNIT_KM) {
+        if(dist_m < 500) { snprintf(dnum,sizeof(dnum),"%d",(int)dist_m); snprintf(dunit,sizeof(dunit),"m"); }
+        else { int km10=(int)(dist_m/100.0f); snprintf(dnum,sizeof(dnum),"%d.%d",km10/10,km10%10); snprintf(dunit,sizeof(dunit),"km"); }
+      } else {
+        if(dist_m < 200) { snprintf(dnum,sizeof(dnum),"%d",(int)(dist_m*3.281f)); snprintf(dunit,sizeof(dunit),"ft"); }
+        else { int mi10=(int)(dist_m/160.934f); snprintf(dnum,sizeof(dnum),"%d.%d",mi10/10,mi10%10); snprintf(dunit,sizeof(dunit),"mi"); }
+      }
+      graphics_draw_text(ctx, dnum, f_md,
+        GRect(q4x-qr+2,q4y-14,qr*2-4,20), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+      graphics_draw_text(ctx, dunit, f_sm,
+        GRect(q4x-qr+2,q4y+2,qr*2-4,14), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
     } else {
       int q3x=cx, q3y=cy+qd;
       graphics_context_set_fill_color(ctx, GColorBlack);
@@ -252,36 +262,26 @@ static void draw_info(GContext *ctx, GRect b, float dist_m, const char *name,
     }
   } else {
     // Rect: 4 corners
-    // Top-left: date (with black background for visibility)
-    GRect dl = GRect(2, 2, w/2-4, 18);
-    draw_pill(ctx, dl);
+    // Top-left: date
     graphics_context_set_text_color(ctx, dim_c);
-    graphics_draw_text(ctx, dbuf_date, f_sm, dl,
-      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_draw_text(ctx, dbuf_date, f_sm,
+      GRect(4, 4, w/2-4, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
     // Top-right: time
-    GRect tr = GRect(w/2+2, 2, w/2-4, 20);
-    draw_pill(ctx, tr);
     graphics_context_set_text_color(ctx, text_c);
-    graphics_draw_text(ctx, tbuf, f_md, tr,
-      GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+    graphics_draw_text(ctx, tbuf, f_md,
+      GRect(w/2, 2, w/2-4, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
     // Bottom
     if(has_dest) {
-      GRect bl = GRect(2, h-20, w/2-4, 18);
-      draw_pill(ctx, bl);
       graphics_context_set_text_color(ctx, text_c);
-      graphics_draw_text(ctx, name, f_sm, bl,
-        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+      graphics_draw_text(ctx, name, f_sm,
+        GRect(4, h-20, w/2-4, 18), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
       char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
-      GRect br = GRect(w/2+2, h-22, w/2-4, 22);
-      draw_pill(ctx, br);
-      graphics_draw_text(ctx, dbuf, f_md, br,
-        GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+      graphics_draw_text(ctx, dbuf, f_md,
+        GRect(w/2, h-22, w/2-4, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
     } else {
-      GRect nb = GRect(4, h-20, w-8, 18);
-      draw_pill(ctx, nb);
       graphics_context_set_text_color(ctx, dim_c);
-      graphics_draw_text(ctx, "Add in Settings", f_sm, nb,
-        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+      graphics_draw_text(ctx, "Add in Settings", f_sm,
+        GRect(4, h-18, w-8, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
     }
   }
 }
@@ -368,7 +368,8 @@ static void draw_classic(GContext *ctx, GRect b, float dest_bearing, float dist_
 static void draw_tech(GContext *ctx, GRect b, float dest_bearing, float dist_m,
                       const char *name, bool has_dest) {
   int w=b.size.w, h=b.size.h, cx=w/2, cy=h/2;
-  int r = (w<h?w:h)/2 - 16;
+  bool rnd = (w==h);
+  int r = (w<h?w:h)/2 - (rnd ? 16 : 28);  // Smaller ring on rect for corner clearance
 
   graphics_context_set_fill_color(ctx, GColorBlack);
   graphics_fill_rect(ctx, b, 0, GCornerNone);
