@@ -79,10 +79,7 @@ static float pcos(float deg) { return (float)cos_lookup(DEG_TO_TRIGANGLE((int)de
 static float haversine(float lat1, float lon1, float lat2, float lon2) {
   float dlat = (lat2-lat1) * PI_F / 180.0f;
   float dlon = (lon2-lon1) * PI_F / 180.0f;
-  float a = psin(dlat*90/PI_F)*psin(dlat*90/PI_F) +
-            pcos(lat1)*pcos(lat2)*psin(dlon*90/PI_F)*psin(dlon*90/PI_F);
-  // Approximate: for small angles, distance ≈ R * c
-  // Use simpler formula for Pebble: equirectangular approximation
+  // Equirectangular approximation (good enough for walking distances)
   float x = dlon * pcos((lat1+lat2)/2);
   float y = dlat;
   float d_rad = x*x + y*y;
@@ -167,8 +164,6 @@ static void load_settings(void) {
 static void draw_needle(GContext *ctx, int cx, int cy, int len, float angle, GColor color) {
   int tip_x = cx + (int)(len * psin(angle));
   int tip_y = cy - (int)(len * pcos(angle));
-  int tail_x = cx - (int)(8 * psin(angle));
-  int tail_y = cy + (int)(8 * pcos(angle));
   int left_x = cx + (int)(5 * psin(angle-90));
   int left_y = cy - (int)(5 * pcos(angle-90));
   int right_x = cx + (int)(5 * psin(angle+90));
@@ -205,6 +200,7 @@ static void draw_info(GContext *ctx, GRect b, float dist_m, const char *name,
 
   if(rnd) {
     // Round: 4 small circle bubbles in each quadrant of the compass
+    int cx=w/2, cy=h/2;
     int qr = 28;   // Bubble radius
     int qd = 52;   // Distance from center to bubble center
     // Top-left: date
@@ -429,7 +425,6 @@ static void draw_tech(GContext *ctx, GRect b, float dest_bearing, float dist_m,
   }
 
   // Heading + bearing readout in center
-  GFont f_lg = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
   graphics_context_set_text_color(ctx, gc);
   char hbuf[16]; snprintf(hbuf, sizeof(hbuf), "HDG %03d", (int)s_heading);
   graphics_draw_text(ctx, hbuf, f_sm,
