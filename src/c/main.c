@@ -25,7 +25,7 @@
 #define P_LOC_BASE 10  // 10-15=lat, 20-25=lon, 30-35=name
 
 // Themes
-enum { THEME_CLASSIC=0, THEME_TECH, THEME_PREMIUM };
+enum { THEME_PREMIUM=0, THEME_CLASSIC, THEME_TECH };
 #define NUM_THEMES 3
 
 // Units
@@ -204,61 +204,88 @@ static void draw_info(GContext *ctx, GRect b, float dist_m, const char *name,
   GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
 
   if(rnd) {
-    // Round: centered text with pill backgrounds
-    int top_y = 8;
-    int bot_y = h - 40;
+    // Round: 4 small circle bubbles in each quadrant of the compass
+    int qr = 28;   // Bubble radius
+    int qd = 52;   // Distance from center to bubble center
+    // Top-left: date
+    int q1x=cx-qd, q1y=cy-qd;
+    graphics_context_set_fill_color(ctx, GColorBlack);
+    graphics_fill_circle(ctx, GPoint(q1x,q1y), qr);
+    graphics_context_set_text_color(ctx, dim_c);
+    // Split date into 2 lines
+    char day_buf[4], mon_buf[8];
+    strftime(day_buf, sizeof(day_buf), "%a", tm);
+    strftime(mon_buf, sizeof(mon_buf), "%b %d", tm);
+    graphics_draw_text(ctx, day_buf, f_sm,
+      GRect(q1x-qr+2,q1y-12,qr*2-4,14), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    graphics_draw_text(ctx, mon_buf, f_sm,
+      GRect(q1x-qr+2,q1y,qr*2-4,14), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
-    // Top center: date + time on one line
-    GRect top_r = GRect(30, top_y, w-60, 18);
-    draw_pill(ctx, top_r);
-    char dt_buf[20];
-    snprintf(dt_buf, sizeof(dt_buf), "%s  %s", dbuf_date, tbuf);
+    // Top-right: time
+    int q2x=cx+qd, q2y=cy-qd;
+    graphics_context_set_fill_color(ctx, GColorBlack);
+    graphics_fill_circle(ctx, GPoint(q2x,q2y), qr);
     graphics_context_set_text_color(ctx, text_c);
-    graphics_draw_text(ctx, dt_buf, f_sm, top_r,
-      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    graphics_draw_text(ctx, tbuf, f_md,
+      GRect(q2x-qr+2,q2y-10,qr*2-4,22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
-    // Bottom: name + distance
     if(has_dest) {
-      GRect name_r = GRect(20, bot_y, w-40, 18);
-      draw_pill(ctx, name_r);
+      // Bottom-left: name (small, 2 lines if needed)
+      int q3x=cx-qd, q3y=cy+qd;
+      graphics_context_set_fill_color(ctx, GColorBlack);
+      graphics_fill_circle(ctx, GPoint(q3x,q3y), qr);
       graphics_context_set_text_color(ctx, text_c);
-      graphics_draw_text(ctx, name, f_sm, name_r,
-        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+      graphics_draw_text(ctx, name, f_sm,
+        GRect(q3x-qr+4,q3y-12,qr*2-8,28), GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
 
+      // Bottom-right: distance
+      int q4x=cx+qd, q4y=cy+qd;
+      graphics_context_set_fill_color(ctx, GColorBlack);
+      graphics_fill_circle(ctx, GPoint(q4x,q4y), qr);
       char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
-      GRect dist_r = GRect(w/2-30, bot_y+20, 60, 18);
-      draw_pill(ctx, dist_r);
-      graphics_draw_text(ctx, dbuf, f_md, dist_r,
-        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+      graphics_context_set_text_color(ctx, text_c);
+      graphics_draw_text(ctx, dbuf, f_md,
+        GRect(q4x-qr+2,q4y-10,qr*2-4,22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
     } else {
-      GRect nr = GRect(30, bot_y+4, w-60, 18);
-      draw_pill(ctx, nr);
+      int q3x=cx, q3y=cy+qd;
+      graphics_context_set_fill_color(ctx, GColorBlack);
+      graphics_fill_circle(ctx, GPoint(q3x,q3y), qr+4);
       graphics_context_set_text_color(ctx, dim_c);
-      graphics_draw_text(ctx, "Add in Settings", f_sm, nr,
-        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+      graphics_draw_text(ctx, "Settings", f_sm,
+        GRect(q3x-qr,q3y-8,qr*2,16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
     }
   } else {
     // Rect: 4 corners
-    // Top-left: date
+    // Top-left: date (with black background for visibility)
+    GRect dl = GRect(2, 2, w/2-4, 18);
+    draw_pill(ctx, dl);
     graphics_context_set_text_color(ctx, dim_c);
-    graphics_draw_text(ctx, dbuf_date, f_sm,
-      GRect(4, 4, w/2-4, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_draw_text(ctx, dbuf_date, f_sm, dl,
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
     // Top-right: time
+    GRect tr = GRect(w/2+2, 2, w/2-4, 20);
+    draw_pill(ctx, tr);
     graphics_context_set_text_color(ctx, text_c);
-    graphics_draw_text(ctx, tbuf, f_md,
-      GRect(w/2, 2, w/2-4, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+    graphics_draw_text(ctx, tbuf, f_md, tr,
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
     // Bottom
     if(has_dest) {
+      GRect bl = GRect(2, h-20, w/2-4, 18);
+      draw_pill(ctx, bl);
       graphics_context_set_text_color(ctx, text_c);
-      graphics_draw_text(ctx, name, f_sm,
-        GRect(4, h-20, w/2-4, 18), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+      graphics_draw_text(ctx, name, f_sm, bl,
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
       char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
-      graphics_draw_text(ctx, dbuf, f_md,
-        GRect(w/2, h-22, w/2-4, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+      GRect br = GRect(w/2+2, h-22, w/2-4, 22);
+      draw_pill(ctx, br);
+      graphics_draw_text(ctx, dbuf, f_md, br,
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
     } else {
+      GRect nb = GRect(4, h-20, w-8, 18);
+      draw_pill(ctx, nb);
       graphics_context_set_text_color(ctx, dim_c);
-      graphics_draw_text(ctx, "Add waypoints in Settings", f_sm,
-        GRect(4, h-18, w-8, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+      graphics_draw_text(ctx, "Add in Settings", f_sm, nb,
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
     }
   }
 }
