@@ -146,13 +146,6 @@ static void load_settings(void) {
       if(persist_exists(P_LOC_BASE+20+i)) persist_read_string(P_LOC_BASE+20+i, s_locs[i].name, NAME_LEN);
       s_locs[i].valid = true;
     }
-  } else {
-    // Default location: Statue of Liberty
-    s_loc_count = 1;
-    s_locs[0].lat = 406892;   // 40.6892 * 10000
-    s_locs[0].lon = -740475;  // -74.0475 * 10000
-    snprintf(s_locs[0].name, NAME_LEN, "Lady Liberty");
-    s_locs[0].valid = true;
   }
 }
 
