@@ -1,0 +1,681 @@
+/**
+ * Pathfinder — Compass Navigation for Pebble
+ * Targets: emery (200x228), gabbro (260x260)
+ *
+ * Save up to 6 locations, compass points you there.
+ * Shows direction, distance, and estimated walking time.
+ * Three display themes: Classic, Minimal, Tech.
+ */
+
+#include <pebble.h>
+#include <stdlib.h>
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+#define MAX_LOCS   6
+#define NAME_LEN   20
+#define PI_F       3.14159265f
+
+// Persist keys
+#define P_UNIT     0
+#define P_THEME    1
+#define P_POLL     2
+#define P_LOC_CNT  3
+#define P_LOC_BASE 10  // 10-15=lat, 20-25=lon, 30-35=name
+
+// Themes
+enum { THEME_CLASSIC=0, THEME_MINIMAL, THEME_TECH };
+
+// Units
+enum { UNIT_MI=0, UNIT_KM };
+
+// Poll rates
+enum { POLL_MANUAL=0, POLL_LOW, POLL_MED, POLL_HIGH };
+static const int s_poll_sec[] = {0, 300, 120, 30};
+
+// ============================================================================
+// DATA
+// ============================================================================
+typedef struct {
+  int32_t lat;   // x10000
+  int32_t lon;   // x10000
+  char name[NAME_LEN];
+  bool valid;
+} Location;
+
+static Window *s_win;
+static Layer *s_canvas;
+
+static Location s_locs[MAX_LOCS];
+static int s_loc_count = 0;
+static int s_sel = 0;              // Selected location index
+
+static float s_heading = 0;        // Compass heading degrees
+static bool s_compass_ok = false;
+static float s_gps_lat = 0;        // Current position (x10000)
+static float s_gps_lon = 0;
+static bool s_gps_valid = false;
+static time_t s_gps_time = 0;      // Last GPS update time
+
+static int s_unit = UNIT_MI;
+static int s_theme = THEME_CLASSIC;
+static int s_poll = POLL_MED;
+
+static int s_steps_at_gps = 0;     // Step count at last GPS update
+static float s_step_dist = 0.7f;   // Meters per step estimate
+
+static AppTimer *s_gps_timer = NULL;
+
+// ============================================================================
+// MATH
+// ============================================================================
+static float psin(float deg) { return (float)sin_lookup(DEG_TO_TRIGANGLE((int)deg))/(float)TRIG_MAX_RATIO; }
+static float pcos(float deg) { return (float)cos_lookup(DEG_TO_TRIGANGLE((int)deg))/(float)TRIG_MAX_RATIO; }
+
+// Haversine distance in meters
+static float haversine(float lat1, float lon1, float lat2, float lon2) {
+  float dlat = (lat2-lat1) * PI_F / 180.0f;
+  float dlon = (lon2-lon1) * PI_F / 180.0f;
+  float a = psin(dlat*90/PI_F)*psin(dlat*90/PI_F) +
+            pcos(lat1)*pcos(lat2)*psin(dlon*90/PI_F)*psin(dlon*90/PI_F);
+  // Approximate: for small angles, distance ≈ R * c
+  // Use simpler formula for Pebble: equirectangular approximation
+  float x = dlon * pcos((lat1+lat2)/2);
+  float y = dlat;
+  float d_rad = x*x + y*y;
+  // sqrt approximation
+  float s = d_rad > 0 ? d_rad : 0.0001f;
+  s = 0.5f*(s + d_rad/s); s = 0.5f*(s + d_rad/s); s = 0.5f*(s + d_rad/s);
+  return s * 6371000.0f;  // Earth radius in meters
+}
+
+// Bearing from point 1 to point 2 in degrees
+static float bearing(float lat1, float lon1, float lat2, float lon2) {
+  float dlon = lon2 - lon1;
+  float y = psin(dlon) * pcos(lat2);
+  float x = pcos(lat1)*psin(lat2) - psin(lat1)*pcos(lat2)*pcos(dlon);
+  int32_t angle = atan2_lookup((int)(y*TRIG_MAX_RATIO), (int)(x*TRIG_MAX_RATIO));
+  float deg = (float)angle * 360.0f / (float)TRIG_MAX_ANGLE;
+  if(deg < 0) deg += 360;
+  return deg;
+}
+
+// Format distance string
+static void fmt_dist(char *buf, int sz, float meters) {
+  if(s_unit == UNIT_KM) {
+    if(meters < 500) snprintf(buf, sz, "%dm", (int)meters);
+    else snprintf(buf, sz, "%.1fkm", meters/1000.0f);
+  } else {
+    float mi = meters / 1609.34f;
+    if(meters < 200) snprintf(buf, sz, "%dft", (int)(meters*3.281f));
+    else snprintf(buf, sz, "%.1fmi", mi);
+  }
+}
+
+// ============================================================================
+// PERSIST
+// ============================================================================
+static void save_settings(void) {
+  persist_write_int(P_UNIT, s_unit);
+  persist_write_int(P_THEME, s_theme);
+  persist_write_int(P_POLL, s_poll);
+  persist_write_int(P_LOC_CNT, s_loc_count);
+  for(int i=0; i<s_loc_count; i++) {
+    persist_write_int(P_LOC_BASE+i, s_locs[i].lat);
+    persist_write_int(P_LOC_BASE+10+i, s_locs[i].lon);
+    persist_write_string(P_LOC_BASE+20+i, s_locs[i].name);
+  }
+}
+
+static void load_settings(void) {
+  if(persist_exists(P_UNIT)) s_unit = persist_read_int(P_UNIT);
+  if(persist_exists(P_THEME)) s_theme = persist_read_int(P_THEME);
+  if(persist_exists(P_POLL)) s_poll = persist_read_int(P_POLL);
+  if(persist_exists(P_LOC_CNT)) s_loc_count = persist_read_int(P_LOC_CNT);
+  for(int i=0; i<s_loc_count && i<MAX_LOCS; i++) {
+    if(persist_exists(P_LOC_BASE+i)) s_locs[i].lat = persist_read_int(P_LOC_BASE+i);
+    if(persist_exists(P_LOC_BASE+10+i)) s_locs[i].lon = persist_read_int(P_LOC_BASE+10+i);
+    if(persist_exists(P_LOC_BASE+20+i)) persist_read_string(P_LOC_BASE+20+i, s_locs[i].name, NAME_LEN);
+    s_locs[i].valid = true;
+  }
+}
+
+// ============================================================================
+// DRAWING HELPERS
+// ============================================================================
+
+// Draw compass needle pointing at bearing
+static void draw_needle(GContext *ctx, int cx, int cy, int len, float angle, GColor color) {
+  int tip_x = cx + (int)(len * psin(angle));
+  int tip_y = cy - (int)(len * pcos(angle));
+  int tail_x = cx - (int)(8 * psin(angle));
+  int tail_y = cy + (int)(8 * pcos(angle));
+  int left_x = cx + (int)(5 * psin(angle-90));
+  int left_y = cy - (int)(5 * pcos(angle-90));
+  int right_x = cx + (int)(5 * psin(angle+90));
+  int right_y = cy - (int)(5 * pcos(angle+90));
+
+  graphics_context_set_fill_color(ctx, color);
+  GPoint tri[] = {GPoint(tip_x,tip_y), GPoint(left_x,left_y), GPoint(right_x,right_y)};
+  GPath *path = gpath_create(&(GPathInfo){.num_points=3, .points=(GPoint*)tri});
+  gpath_draw_filled(ctx, path);
+  gpath_destroy(path);
+}
+
+// ============================================================================
+// THEME: CLASSIC
+// ============================================================================
+static void draw_classic(GContext *ctx, GRect b, float dest_bearing, float dist_m,
+                         const char *name, bool has_dest) {
+  int w=b.size.w, h=b.size.h, cx=w/2, cy=h/2;
+  int r = (w<h?w:h)/2 - 20;
+
+  // Warm background
+  #ifdef PBL_COLOR
+  graphics_context_set_fill_color(ctx, GColorFromHEX(0x2a1a0a));
+  #else
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  #endif
+  graphics_fill_rect(ctx, b, 0, GCornerNone);
+
+  // Compass circle
+  #ifdef PBL_COLOR
+  graphics_context_set_stroke_color(ctx, GColorFromHEX(0x886622));
+  #else
+  graphics_context_set_stroke_color(ctx, GColorWhite);
+  #endif
+  graphics_context_set_stroke_width(ctx, 2);
+  graphics_draw_circle(ctx, GPoint(cx,cy), r);
+  graphics_draw_circle(ctx, GPoint(cx,cy), r-3);
+
+  // Degree ticks
+  graphics_context_set_stroke_width(ctx, 1);
+  for(int d=0; d<360; d+=30) {
+    float a = d - s_heading;
+    int inner = (d%90==0) ? r-12 : r-8;
+    int x1 = cx + (int)(inner * psin(a));
+    int y1 = cy - (int)(inner * pcos(a));
+    int x2 = cx + (int)((r-4) * psin(a));
+    int y2 = cy - (int)((r-4) * pcos(a));
+    graphics_draw_line(ctx, GPoint(x1,y1), GPoint(x2,y2));
+  }
+
+  // Cardinal directions
+  GFont f_dir = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  const char *dirs[] = {"N","E","S","W"};
+  float dir_az[] = {0,90,180,270};
+  for(int i=0; i<4; i++) {
+    float a = dir_az[i] - s_heading;
+    int dx = cx + (int)((r-20) * psin(a));
+    int dy = cy - (int)((r-20) * pcos(a));
+    #ifdef PBL_COLOR
+    graphics_context_set_text_color(ctx, (i==0)?GColorRed:GColorFromHEX(0xCCAA66));
+    #else
+    graphics_context_set_text_color(ctx, GColorWhite);
+    #endif
+    graphics_draw_text(ctx, dirs[i], f_dir,
+      GRect(dx-8,dy-10,16,20), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+
+  // Destination needle
+  if(has_dest) {
+    float needle_angle = dest_bearing - s_heading;
+    #ifdef PBL_COLOR
+    draw_needle(ctx, cx, cy, r-28, needle_angle, GColorRed);
+    #else
+    draw_needle(ctx, cx, cy, r-28, needle_angle, GColorWhite);
+    #endif
+  }
+
+  // Center dot
+  #ifdef PBL_COLOR
+  graphics_context_set_fill_color(ctx, GColorFromHEX(0x886622));
+  #else
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  #endif
+  graphics_fill_circle(ctx, GPoint(cx,cy), 4);
+
+  // Time at top
+  GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  time_t now = time(NULL);
+  struct tm *tm = localtime(&now);
+  char tbuf[8];
+  strftime(tbuf, sizeof(tbuf), clock_is_24h_style()?"%H:%M":"%I:%M", tm);
+  #ifdef PBL_COLOR
+  graphics_context_set_text_color(ctx, GColorFromHEX(0xCCAA66));
+  #else
+  graphics_context_set_text_color(ctx, GColorWhite);
+  #endif
+  graphics_draw_text(ctx, tbuf, f_sm,
+    GRect(0, 4, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+
+  // Location name + distance at bottom
+  GFont f_md = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  if(has_dest) {
+    graphics_draw_text(ctx, name, f_md,
+      GRect(0, h-42, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    char dbuf[16];
+    fmt_dist(dbuf, sizeof(dbuf), dist_m);
+    graphics_draw_text(ctx, dbuf, f_md,
+      GRect(0, h-24, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  } else {
+    graphics_draw_text(ctx, "No waypoint set", f_sm,
+      GRect(0, h-30, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    graphics_draw_text(ctx, "Configure in Settings", f_sm,
+      GRect(0, h-16, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+}
+
+// ============================================================================
+// THEME: MINIMAL
+// ============================================================================
+static void draw_minimal(GContext *ctx, GRect b, float dest_bearing, float dist_m,
+                         const char *name, bool has_dest) {
+  int w=b.size.w, h=b.size.h, cx=w/2, cy=h/2;
+  int r = (w<h?w:h)/2 - 20;
+
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(ctx, b, 0, GCornerNone);
+
+  // Thin circle
+  graphics_context_set_stroke_color(ctx, GColorWhite);
+  graphics_context_set_stroke_width(ctx, 1);
+  graphics_draw_circle(ctx, GPoint(cx,cy), r);
+
+  // N/S/E/W
+  GFont f_dir = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  const char *dirs[] = {"N","E","S","W"};
+  float dir_az[] = {0,90,180,270};
+  for(int i=0; i<4; i++) {
+    float a = dir_az[i] - s_heading;
+    int dx = cx + (int)((r+10) * psin(a));
+    int dy = cy - (int)((r+10) * pcos(a));
+    graphics_context_set_text_color(ctx, GColorWhite);
+    graphics_draw_text(ctx, dirs[i], f_dir,
+      GRect(dx-6,dy-8,12,16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+
+  // Destination needle (thin line)
+  if(has_dest) {
+    float a = dest_bearing - s_heading;
+    int tx = cx + (int)((r-8) * psin(a));
+    int ty = cy - (int)((r-8) * pcos(a));
+    graphics_context_set_stroke_color(ctx, GColorWhite);
+    graphics_context_set_stroke_width(ctx, 2);
+    graphics_draw_line(ctx, GPoint(cx,cy), GPoint(tx,ty));
+    graphics_context_set_fill_color(ctx, GColorWhite);
+    graphics_fill_circle(ctx, GPoint(tx,ty), 4);
+  }
+
+  // Center dot
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_fill_circle(ctx, GPoint(cx,cy), 2);
+
+  // Time
+  GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  time_t now = time(NULL);
+  struct tm *tm = localtime(&now);
+  char tbuf[8];
+  strftime(tbuf, sizeof(tbuf), clock_is_24h_style()?"%H:%M":"%I:%M", tm);
+  graphics_context_set_text_color(ctx, GColorLightGray);
+  graphics_draw_text(ctx, tbuf, f_sm,
+    GRect(0, 4, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+
+  // Name + distance
+  GFont f_md = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  graphics_context_set_text_color(ctx, GColorWhite);
+  if(has_dest) {
+    graphics_draw_text(ctx, name, f_md,
+      GRect(0, h-42, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
+    graphics_draw_text(ctx, dbuf, f_sm,
+      GRect(0, h-22, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  } else {
+    graphics_draw_text(ctx, "No waypoint", f_sm,
+      GRect(0, h-24, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+}
+
+// ============================================================================
+// THEME: TECH
+// ============================================================================
+static void draw_tech(GContext *ctx, GRect b, float dest_bearing, float dist_m,
+                      const char *name, bool has_dest) {
+  int w=b.size.w, h=b.size.h, cx=w/2, cy=h/2;
+  int r = (w<h?w:h)/2 - 20;
+
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(ctx, b, 0, GCornerNone);
+
+  #ifdef PBL_COLOR
+  GColor gc = GColorFromHEX(0x00AA00);
+  GColor gcd = GColorFromHEX(0x004400);
+  #else
+  GColor gc = GColorWhite;
+  GColor gcd = GColorDarkGray;
+  #endif
+
+  // Grid crosshair
+  graphics_context_set_stroke_color(ctx, gcd);
+  graphics_context_set_stroke_width(ctx, 1);
+  graphics_draw_line(ctx, GPoint(cx,cy-r), GPoint(cx,cy+r));
+  graphics_draw_line(ctx, GPoint(cx-r,cy), GPoint(cx+r,cy));
+  graphics_draw_circle(ctx, GPoint(cx,cy), r/3);
+  graphics_draw_circle(ctx, GPoint(cx,cy), r*2/3);
+
+  // Compass ring with degree numbers
+  graphics_context_set_stroke_color(ctx, gc);
+  graphics_draw_circle(ctx, GPoint(cx,cy), r);
+  GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  for(int d=0; d<360; d+=30) {
+    float a = d - s_heading;
+    int tx = cx + (int)((r-14) * psin(a));
+    int ty = cy - (int)((r-14) * pcos(a));
+    char dbuf[4]; snprintf(dbuf, sizeof(dbuf), "%d", d);
+    graphics_context_set_text_color(ctx, gc);
+    graphics_draw_text(ctx, dbuf, f_sm,
+      GRect(tx-12,ty-8,24,16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    // Tick
+    int ix = cx + (int)(r * psin(a));
+    int iy = cy - (int)(r * pcos(a));
+    int ox = cx + (int)((r-4) * psin(a));
+    int oy = cy - (int)((r-4) * pcos(a));
+    graphics_draw_line(ctx, GPoint(ix,iy), GPoint(ox,oy));
+  }
+
+  // Destination bearing line
+  if(has_dest) {
+    float a = dest_bearing - s_heading;
+    int tx = cx + (int)((r-4) * psin(a));
+    int ty = cy - (int)((r-4) * pcos(a));
+    graphics_context_set_stroke_color(ctx, gc);
+    graphics_context_set_stroke_width(ctx, 3);
+    graphics_draw_line(ctx, GPoint(cx,cy), GPoint(tx,ty));
+    graphics_context_set_stroke_width(ctx, 1);
+  }
+
+  // Heading readout
+  GFont f_lg = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+  char hbuf[8]; snprintf(hbuf, sizeof(hbuf), "%03d", (int)s_heading);
+  graphics_context_set_text_color(ctx, gc);
+  graphics_draw_text(ctx, hbuf, f_lg,
+    GRect(0, 2, w, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+
+  // Bearing to destination
+  if(has_dest) {
+    char bbuf[16]; snprintf(bbuf, sizeof(bbuf), "BRG %03d", (int)dest_bearing);
+    graphics_draw_text(ctx, bbuf, f_sm,
+      GRect(0, h-56, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+
+  // Name + distance
+  GFont f_md = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  if(has_dest) {
+    graphics_draw_text(ctx, name, f_md,
+      GRect(0, h-40, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
+    graphics_draw_text(ctx, dbuf, f_md,
+      GRect(0, h-22, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  } else {
+    graphics_draw_text(ctx, "NO TARGET", f_md,
+      GRect(0, h-30, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+
+  // Time
+  time_t now = time(NULL);
+  struct tm *tm = localtime(&now);
+  char tbuf[8];
+  strftime(tbuf, sizeof(tbuf), clock_is_24h_style()?"%H:%M":"%I:%M", tm);
+  graphics_draw_text(ctx, tbuf, f_sm,
+    GRect(0, h-12, w, 14), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+}
+
+// ============================================================================
+// CANVAS
+// ============================================================================
+static void canvas_proc(Layer *l, GContext *ctx) {
+  GRect b = layer_get_bounds(l);
+
+  // Calculate bearing and distance to selected waypoint
+  float dest_bearing = 0;
+  float dist_m = 0;
+  bool has_dest = false;
+  const char *dest_name = "";
+
+  if(s_loc_count > 0 && s_sel < s_loc_count && s_gps_valid) {
+    Location *loc = &s_locs[s_sel];
+    float lat1 = s_gps_lat / 10000.0f;
+    float lon1 = s_gps_lon / 10000.0f;
+    float lat2 = (float)loc->lat / 10000.0f;
+    float lon2 = (float)loc->lon / 10000.0f;
+    dest_bearing = bearing(lat1, lon1, lat2, lon2);
+    dist_m = haversine(lat1, lon1, lat2, lon2);
+
+    // Step gap-fill: subtract estimated distance walked since last GPS
+    #if PBL_API_EXISTS(health_service_sum_today)
+    int cur_steps = (int)health_service_sum_today(HealthMetricStepCount);
+    int steps_since = cur_steps - s_steps_at_gps;
+    if(steps_since > 0) {
+      float walked = steps_since * s_step_dist;
+      dist_m -= walked;
+      if(dist_m < 0) dist_m = 0;
+    }
+    #endif
+
+    has_dest = true;
+    dest_name = loc->name;
+  }
+
+  // Draw selected theme
+  switch(s_theme) {
+    case THEME_CLASSIC:  draw_classic(ctx, b, dest_bearing, dist_m, dest_name, has_dest); break;
+    case THEME_MINIMAL:  draw_minimal(ctx, b, dest_bearing, dist_m, dest_name, has_dest); break;
+    case THEME_TECH:     draw_tech(ctx, b, dest_bearing, dist_m, dest_name, has_dest); break;
+    default:             draw_classic(ctx, b, dest_bearing, dist_m, dest_name, has_dest); break;
+  }
+
+  // GPS staleness indicator
+  if(s_gps_valid && s_gps_time > 0) {
+    int age = time(NULL) - s_gps_time;
+    if(age > 120) {
+      GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+      char abuf[12];
+      snprintf(abuf, sizeof(abuf), "GPS %dm ago", age/60);
+      graphics_context_set_text_color(ctx, GColorLightGray);
+      graphics_draw_text(ctx, abuf, f_sm,
+        GRect(0, b.size.h/2+20, b.size.w, 14), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    }
+  }
+
+  // Waypoint counter
+  if(s_loc_count > 1) {
+    GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+    char cbuf[8]; snprintf(cbuf, sizeof(cbuf), "%d/%d", s_sel+1, s_loc_count);
+    graphics_context_set_text_color(ctx, GColorLightGray);
+    graphics_draw_text(ctx, cbuf, f_sm,
+      GRect(0, 18, b.size.w, 14), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+}
+
+// ============================================================================
+// COMPASS
+// ============================================================================
+static void compass_handler(CompassHeadingData heading_data) {
+  if(heading_data.compass_status == CompassStatusDataInvalid) {
+    s_compass_ok = false;
+  } else {
+    s_compass_ok = true;
+    s_heading = (float)TRIGANGLE_TO_DEG((int)heading_data.magnetic_heading);
+  }
+  if(s_canvas) layer_mark_dirty(s_canvas);
+}
+
+// ============================================================================
+// GPS TIMER
+// ============================================================================
+static void request_gps(void *data) {
+  DictionaryIterator *it;
+  if(app_message_outbox_begin(&it) == APP_MSG_OK) {
+    dict_write_uint8(it, MESSAGE_KEY_REQUEST_GPS, 1);
+    app_message_outbox_send();
+  }
+  // Schedule next poll
+  if(s_poll > 0 && s_poll_sec[s_poll] > 0) {
+    s_gps_timer = app_timer_register(s_poll_sec[s_poll]*1000, request_gps, NULL);
+  }
+}
+
+// ============================================================================
+// APPMESSAGE
+// ============================================================================
+static void inbox_cb(DictionaryIterator *it, void *c) {
+  Tuple *t;
+
+  // GPS update
+  t = dict_find(it, MESSAGE_KEY_GPS_LAT);
+  if(t) {
+    s_gps_lat = (float)t->value->int32;
+    s_gps_valid = true;
+    s_gps_time = time(NULL);
+    #if PBL_API_EXISTS(health_service_sum_today)
+    s_steps_at_gps = (int)health_service_sum_today(HealthMetricStepCount);
+    #endif
+  }
+  t = dict_find(it, MESSAGE_KEY_GPS_LON);
+  if(t) s_gps_lon = (float)t->value->int32;
+
+  // Settings (packed: unit | theme<<2 | poll<<4)
+  t = dict_find(it, MESSAGE_KEY_SETTINGS);
+  if(t) {
+    int v = (int)t->value->int32;
+    s_unit = v & 3;
+    s_theme = (v>>2) & 3;
+    s_poll = (v>>4) & 3;
+  }
+
+  // Locations
+  t = dict_find(it, MESSAGE_KEY_LOC_COUNT);
+  if(t) {
+    s_loc_count = (int)t->value->int32;
+    if(s_loc_count > MAX_LOCS) s_loc_count = MAX_LOCS;
+    if(s_sel >= s_loc_count) s_sel = 0;
+  }
+
+  // Location data (check each slot)
+  int key_base[] = {MESSAGE_KEY_LOC1_LAT, MESSAGE_KEY_LOC2_LAT, MESSAGE_KEY_LOC3_LAT,
+                    MESSAGE_KEY_LOC4_LAT, MESSAGE_KEY_LOC5_LAT, MESSAGE_KEY_LOC6_LAT};
+  for(int i=0; i<MAX_LOCS; i++) {
+    t = dict_find(it, key_base[i]);
+    if(t) {
+      s_locs[i].lat = t->value->int32;
+      s_locs[i].valid = true;
+    }
+    t = dict_find(it, key_base[i]+1);  // LON is always LAT+1
+    if(t) s_locs[i].lon = t->value->int32;
+    t = dict_find(it, key_base[i]+2);  // NAME is always LAT+2
+    if(t) {
+      strncpy(s_locs[i].name, t->value->cstring, NAME_LEN-1);
+      s_locs[i].name[NAME_LEN-1] = '\0';
+    }
+  }
+
+  save_settings();
+  if(s_canvas) layer_mark_dirty(s_canvas);
+}
+
+// ============================================================================
+// BUTTONS
+// ============================================================================
+static void up_click(ClickRecognizerRef ref, void *ctx) {
+  if(s_loc_count > 0) {
+    s_sel = (s_sel + s_loc_count - 1) % s_loc_count;
+    if(s_canvas) layer_mark_dirty(s_canvas);
+  }
+}
+
+static void down_click(ClickRecognizerRef ref, void *ctx) {
+  if(s_loc_count > 0) {
+    s_sel = (s_sel + 1) % s_loc_count;
+    if(s_canvas) layer_mark_dirty(s_canvas);
+  }
+}
+
+static void select_click(ClickRecognizerRef ref, void *ctx) {
+  // Manual GPS refresh
+  request_gps(NULL);
+  vibes_short_pulse();
+}
+
+static void select_long(ClickRecognizerRef ref, void *ctx) {
+  // Cycle theme
+  s_theme = (s_theme + 1) % 3;
+  save_settings();
+  if(s_canvas) layer_mark_dirty(s_canvas);
+}
+
+static void back_click(ClickRecognizerRef ref, void *ctx) {
+  window_stack_pop(true);
+}
+
+static void click_config(void *ctx) {
+  window_single_click_subscribe(BUTTON_ID_UP, up_click);
+  window_single_click_subscribe(BUTTON_ID_DOWN, down_click);
+  window_single_click_subscribe(BUTTON_ID_SELECT, select_click);
+  window_long_click_subscribe(BUTTON_ID_SELECT, 700, select_long, NULL);
+  window_single_click_subscribe(BUTTON_ID_BACK, back_click);
+}
+
+// ============================================================================
+// TICK (update time display)
+// ============================================================================
+static void tick_cb(struct tm *t, TimeUnits u) {
+  if(s_canvas) layer_mark_dirty(s_canvas);
+}
+
+// ============================================================================
+// WINDOW
+// ============================================================================
+static void win_load(Window *w) {
+  Layer *wl = window_get_root_layer(w);
+  GRect b = layer_get_bounds(wl);
+  s_canvas = layer_create(b);
+  layer_set_update_proc(s_canvas, canvas_proc);
+  layer_add_child(wl, s_canvas);
+  window_set_click_config_provider(w, click_config);
+
+  compass_service_set_heading_filter(TRIG_MAX_ANGLE / 360);
+  compass_service_subscribe(compass_handler);
+  tick_timer_service_subscribe(MINUTE_UNIT, tick_cb);
+
+  // Start GPS polling
+  if(s_poll > 0) {
+    s_gps_timer = app_timer_register(1000, request_gps, NULL);
+  }
+}
+
+static void win_unload(Window *w) {
+  compass_service_unsubscribe();
+  tick_timer_service_unsubscribe();
+  if(s_gps_timer) { app_timer_cancel(s_gps_timer); s_gps_timer = NULL; }
+  if(s_canvas) { layer_destroy(s_canvas); s_canvas = NULL; }
+}
+
+// ============================================================================
+// LIFECYCLE
+// ============================================================================
+static void init(void) {
+  load_settings();
+  s_win = window_create();
+  window_set_background_color(s_win, GColorBlack);
+  window_set_window_handlers(s_win, (WindowHandlers){.load=win_load, .unload=win_unload});
+  app_message_register_inbox_received(inbox_cb);
+  app_message_open(1024, 64);
+  window_stack_push(s_win, true);
+}
+
+static void deinit(void) {
+  window_destroy(s_win);
+}
+
+int main(void) { init(); app_event_loop(); deinit(); return 0; }

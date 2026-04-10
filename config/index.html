@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pathfinder Settings</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, sans-serif; background: #1a1a1a; color: #eee;
+           min-height: 100vh; padding: 16px; }
+    .header { text-align: center; padding: 16px 0; }
+    .header h1 { font-size: 22px; color: #ff8844; }
+    .header p { color: #888; font-size: 13px; margin-top: 4px; }
+    .card { background: #222; border-radius: 10px; padding: 16px; margin: 12px 0; }
+    .card h2 { font-size: 14px; color: #ff8844; margin-bottom: 10px; }
+    label { display: block; font-size: 13px; color: #aaa; margin-bottom: 4px; }
+    input[type="text"] { width: 100%; padding: 10px; font-size: 14px; background: #333;
+      border: 1px solid #555; border-radius: 6px; color: #fff; margin-bottom: 8px; }
+    .hint { font-size: 11px; color: #666; margin-top: -4px; margin-bottom: 8px; }
+    .toggle-group { display: flex; border-radius: 6px; overflow: hidden;
+      border: 1px solid #ff8844; margin-bottom: 10px; }
+    .toggle-group label { flex: 1; text-align: center; padding: 10px; font-size: 13px;
+      font-weight: bold; color: #aaa; background: #333; cursor: pointer; margin-bottom: 0; }
+    .toggle-group input[type="radio"] { display: none; }
+    .toggle-group input[type="radio"]:checked + label { background: #ff8844; color: #1a1a1a; }
+    .btn { display: block; width: 100%; padding: 12px; font-size: 15px; font-weight: bold;
+      border: none; border-radius: 8px; cursor: pointer; margin-top: 16px; }
+    .btn-save { background: #ff8844; color: #1a1a1a; }
+    .btn-cancel { background: #333; color: #aaa; margin-top: 8px; }
+    .btn-sm { display: inline-block; padding: 6px 12px; font-size: 12px; border-radius: 4px;
+      background: #444; color: #ccc; border: none; cursor: pointer; margin-left: 4px; }
+    .loc-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+    .loc-row input { flex: 1; }
+    .remove-btn { background: #662222; color: #ff6666; border: none; padding: 6px 10px;
+      border-radius: 4px; cursor: pointer; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Pathfinder</h1>
+    <p>Compass navigation to saved waypoints</p>
+  </div>
+
+  <div class="card">
+    <h2>Waypoints</h2>
+    <div id="locList"></div>
+    <button class="btn-sm" id="addBtn" onclick="addLocation()">+ Add Waypoint</button>
+    <p class="hint" style="margin-top:8px">Enter a city/address or lat,lon (e.g. "40.758,-73.985")</p>
+  </div>
+
+  <div class="card">
+    <h2>Distance Unit</h2>
+    <div class="toggle-group">
+      <input type="radio" name="unit" id="unitMi" value="0">
+      <label for="unitMi">Miles</label>
+      <input type="radio" name="unit" id="unitKm" value="1">
+      <label for="unitKm">KM</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>GPS Refresh</h2>
+    <div class="toggle-group">
+      <input type="radio" name="poll" id="pollManual" value="0">
+      <label for="pollManual">Manual</label>
+      <input type="radio" name="poll" id="pollLow" value="1">
+      <label for="pollLow">5min</label>
+      <input type="radio" name="poll" id="pollMed" value="2">
+      <label for="pollMed">2min</label>
+      <input type="radio" name="poll" id="pollHigh" value="3">
+      <label for="pollHigh">30s</label>
+    </div>
+    <p class="hint">Higher refresh = more battery drain</p>
+  </div>
+
+  <div class="card">
+    <h2>Display Theme</h2>
+    <div class="toggle-group">
+      <input type="radio" name="theme" id="themeClassic" value="0">
+      <label for="themeClassic">Classic</label>
+      <input type="radio" name="theme" id="themeMinimal" value="1">
+      <label for="themeMinimal">Minimal</label>
+      <input type="radio" name="theme" id="themeTech" value="2">
+      <label for="themeTech">Tech</label>
+    </div>
+  </div>
+
+  <button class="btn btn-save" id="saveBtn">Save Settings</button>
+  <button class="btn btn-cancel" id="cancelBtn">Cancel</button>
+
+  <script>
+    var locations = [];
+
+    function getParam(name) {
+      var match = location.search.match(new RegExp('[?&]' + name + '=([^&]*)'));
+      return match ? decodeURIComponent(match[1]) : '';
+    }
+
+    // Load existing settings
+    try {
+      var s = JSON.parse(getParam('settings'));
+      if(s.locations) locations = s.locations;
+      document.getElementById('unit' + (s.unit===1?'Km':'Mi')).checked = true;
+      var pollIds = ['pollManual','pollLow','pollMed','pollHigh'];
+      document.getElementById(pollIds[s.poll||2]).checked = true;
+      var themeIds = ['themeClassic','themeMinimal','themeTech'];
+      document.getElementById(themeIds[s.theme||0]).checked = true;
+    } catch(e) {
+      document.getElementById('unitMi').checked = true;
+      document.getElementById('pollMed').checked = true;
+      document.getElementById('themeClassic').checked = true;
+    }
+
+    function renderLocations() {
+      var html = '';
+      for(var i=0; i<locations.length; i++) {
+        var loc = locations[i];
+        html += '<div class="loc-row">' +
+          '<input type="text" id="locName'+i+'" value="'+loc.name+'" placeholder="Name">' +
+          '<input type="text" id="locAddr'+i+'" value="'+(loc.addr||'')+'" placeholder="Address or lat,lon">' +
+          '<button class="remove-btn" onclick="removeLoc('+i+')">X</button></div>';
+      }
+      document.getElementById('locList').innerHTML = html;
+      document.getElementById('addBtn').style.display = locations.length >= 6 ? 'none' : '';
+    }
+
+    function addLocation() {
+      if(locations.length >= 6) return;
+      locations.push({name: '', addr: '', lat: 0, lon: 0});
+      renderLocations();
+    }
+
+    function removeLoc(idx) {
+      locations.splice(idx, 1);
+      renderLocations();
+    }
+
+    renderLocations();
+
+    var returnTo = getParam('return_to');
+    function returnResult(json) {
+      var enc = encodeURIComponent(json);
+      if(returnTo) document.location = returnTo + 'response=' + enc + '#' + enc;
+      else document.location = 'pebblejs://close#' + enc;
+    }
+
+    // Geocode all locations, then save
+    document.getElementById('saveBtn').addEventListener('click', function() {
+      // Read current values from inputs
+      for(var i=0; i<locations.length; i++) {
+        locations[i].name = document.getElementById('locName'+i).value.trim() || ('Loc '+(i+1));
+        locations[i].addr = document.getElementById('locAddr'+i).value.trim();
+      }
+
+      var unit = document.querySelector('input[name="unit"]:checked');
+      var poll = document.querySelector('input[name="poll"]:checked');
+      var theme = document.querySelector('input[name="theme"]:checked');
+
+      // Geocode any locations that need it
+      var pending = 0;
+      var done = function() {
+        var result = {
+          unit: unit ? unit.value : '0',
+          theme: theme ? theme.value : '0',
+          poll: poll ? poll.value : '2',
+          locations: locations
+        };
+        returnResult(JSON.stringify(result));
+      };
+
+      for(var i=0; i<locations.length; i++) {
+        var addr = locations[i].addr;
+        if(!addr) continue;
+        // Check if it's already lat,lon
+        var parts = addr.split(',');
+        if(parts.length === 2 && !isNaN(parseFloat(parts[0])) && !isNaN(parseFloat(parts[1]))) {
+          locations[i].lat = parseFloat(parts[0]);
+          locations[i].lon = parseFloat(parts[1]);
+          continue;
+        }
+        // Needs geocoding
+        pending++;
+        (function(idx) {
+          var xhr = new XMLHttpRequest();
+          var url = 'https://geocoding-api.open-meteo.com/v1/search?name=' +
+                    encodeURIComponent(locations[idx].addr) + '&count=1&language=en&format=json';
+          xhr.onload = function() {
+            try {
+              var j = JSON.parse(xhr.responseText);
+              if(j.results && j.results.length > 0) {
+                locations[idx].lat = j.results[0].latitude;
+                locations[idx].lon = j.results[0].longitude;
+              }
+            } catch(e) {}
+            pending--;
+            if(pending === 0) done();
+          };
+          xhr.onerror = function() { pending--; if(pending===0) done(); };
+          xhr.open('GET', url);
+          xhr.send();
+        })(i);
+      }
+
+      if(pending === 0) done();
+    });
+
+    document.getElementById('cancelBtn').addEventListener('click', function() {
+      if(returnTo) document.location = returnTo;
+      else document.location = 'pebblejs://close';
+    });
+  </script>
+</body>
+</html>
