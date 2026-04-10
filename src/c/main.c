@@ -386,7 +386,7 @@ static void draw_tech(GContext *ctx, GRect b, float dest_bearing, float dist_m,
 
   #ifdef PBL_COLOR
   GColor gc = GColorFromHEX(0x00CC00);
-  GColor gcd = GColorFromHEX(0x003300);
+  GColor gcd = GColorFromHEX(0x008800);
   #else
   GColor gc = GColorWhite;
   GColor gcd = GColorDarkGray;
