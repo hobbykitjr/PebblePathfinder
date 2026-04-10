@@ -1,35 +1,64 @@
 {
-  "name": "pebble-pathfinder",
-  "author": "Hobbykitjr",
-  "version": "1.0.0",
-  "keywords": ["pebble-app"],
-  "private": true,
-  "dependencies": {},
-  "pebble": {
-    "displayName": "Pathfinder",
-    "uuid": "b1c2d3e4-f5a6-b7c8-d9e0-f1a2b3c4d5e6",
-    "sdkVersion": "3",
-    "enableMultiJS": true,
-    "targetPlatforms": ["emery", "gabbro"],
-    "capabilities": ["location", "configurable", "compass", "health"],
-    "messageKeys": {
-      "GPS_LAT": 0,
-      "GPS_LON": 1,
-      "SETTINGS": 2,
-      "LOC_COUNT": 3,
-      "LOC1_LAT": 4, "LOC1_LON": 5, "LOC1_NAME": 6,
-      "LOC2_LAT": 7, "LOC2_LON": 8, "LOC2_NAME": 9,
-      "LOC3_LAT": 10, "LOC3_LON": 11, "LOC3_NAME": 12,
-      "LOC4_LAT": 13, "LOC4_LON": 14, "LOC4_NAME": 15,
-      "LOC5_LAT": 16, "LOC5_LON": 17, "LOC5_NAME": 18,
-      "LOC6_LAT": 19, "LOC6_LON": 20, "LOC6_NAME": 21,
-      "REQUEST_GPS": 22
+    "author": "Hobbykitjr",
+    "dependencies": {},
+    "keywords": [
+        "pebble-app"
+    ],
+    "name": "pebble-pathfinder",
+    "pebble": {
+        "capabilities": [
+            "location",
+            "configurable",
+            "health"
+        ],
+        "displayName": "Pathfinder",
+        "enableMultiJS": true,
+        "messageKeys": {
+            "GPS_LAT": 0,
+            "GPS_LON": 1,
+            "LOC1_LAT": 4,
+            "LOC1_LON": 5,
+            "LOC1_NAME": 6,
+            "LOC2_LAT": 7,
+            "LOC2_LON": 8,
+            "LOC2_NAME": 9,
+            "LOC3_LAT": 10,
+            "LOC3_LON": 11,
+            "LOC3_NAME": 12,
+            "LOC4_LAT": 13,
+            "LOC4_LON": 14,
+            "LOC4_NAME": 15,
+            "LOC5_LAT": 16,
+            "LOC5_LON": 17,
+            "LOC5_NAME": 18,
+            "LOC6_LAT": 19,
+            "LOC6_LON": 20,
+            "LOC6_NAME": 21,
+            "LOC_COUNT": 3,
+            "REQUEST_GPS": 22,
+            "SETTINGS": 2
+        },
+        "projectType": "native",
+        "resources": {
+            "media": [
+                {
+                    "file": "images/menu_icon.png",
+                    "menuIcon": true,
+                    "name": "ICON",
+                    "targetPlatforms": null,
+                    "type": "bitmap"
+                }
+            ]
+        },
+        "sdkVersion": "3",
+        "targetPlatforms": [
+            "emery",
+            "gabbro"
+        ],
+        "uuid": "98076bbe-a531-4f37-8e57-1a8f5efad47c",
+        "watchapp": {
+            "watchface": false
+        }
     },
-    "watchapp": {
-      "watchface": false
-    },
-    "resources": {
-      "media": []
-    }
-  }
+    "version": "1.0.0"
 }
