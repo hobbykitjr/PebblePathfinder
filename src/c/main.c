@@ -25,8 +25,8 @@
 #define P_LOC_BASE 10  // 10-15=lat, 20-25=lon, 30-35=name
 
 // Themes
-enum { THEME_CLASSIC=0, THEME_MINIMAL, THEME_TECH, THEME_PREMIUM };
-#define NUM_THEMES 4
+enum { THEME_CLASSIC=0, THEME_TECH, THEME_PREMIUM };
+#define NUM_THEMES 3
 
 // Units
 enum { UNIT_MI=0, UNIT_KM };
@@ -182,11 +182,16 @@ static void draw_needle(GContext *ctx, int cx, int cy, int len, float angle, GCo
 }
 
 // ============================================================================
-// SHARED: 4-quadrant info overlay (date/time top, name/dist bottom)
+// SHARED: info overlay with black pill backgrounds for readability
 // ============================================================================
+static void draw_pill(GContext *ctx, GRect r) {
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(ctx, GRect(r.origin.x-2, r.origin.y-1, r.size.w+4, r.size.h+2), 4, GCornersAll);
+}
+
 static void draw_info(GContext *ctx, GRect b, float dist_m, const char *name,
                       bool has_dest, GColor text_c, GColor dim_c) {
-  int w=b.size.w, h=b.size.h, cx=w/2, cy=h/2;
+  int w=b.size.w, h=b.size.h;
   bool rnd = (w==h);
 
   time_t now = time(NULL);
@@ -198,37 +203,63 @@ static void draw_info(GContext *ctx, GRect b, float dist_m, const char *name,
   GFont f_md = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
   GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
 
-  // Insets for round display (text inside compass circle)
-  int pad = rnd ? 24 : 4;
-  int top_y = rnd ? 28 : 4;
-  int bot_y = rnd ? h-44 : h-22;
+  if(rnd) {
+    // Round: centered text with pill backgrounds
+    int top_y = 8;
+    int bot_y = h - 40;
 
-  // Top-left: date
-  graphics_context_set_text_color(ctx, dim_c);
-  graphics_draw_text(ctx, dbuf_date, f_sm,
-    GRect(pad, top_y, cx-pad, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-
-  // Top-right: time
-  graphics_context_set_text_color(ctx, text_c);
-  graphics_draw_text(ctx, tbuf, f_md,
-    GRect(cx, top_y-2, cx-pad, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
-
-  // Bottom: name + distance
-  if(has_dest) {
-    // Bottom-left: name
+    // Top center: date + time on one line
+    GRect top_r = GRect(30, top_y, w-60, 18);
+    draw_pill(ctx, top_r);
+    char dt_buf[20];
+    snprintf(dt_buf, sizeof(dt_buf), "%s  %s", dbuf_date, tbuf);
     graphics_context_set_text_color(ctx, text_c);
-    graphics_draw_text(ctx, name, f_md,
-      GRect(pad, bot_y, cx-pad, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-    // Bottom-right: distance
-    char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
-    graphics_draw_text(ctx, dbuf, f_md,
-      GRect(cx, bot_y, cx-pad, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+    graphics_draw_text(ctx, dt_buf, f_sm, top_r,
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+
+    // Bottom: name + distance
+    if(has_dest) {
+      GRect name_r = GRect(20, bot_y, w-40, 18);
+      draw_pill(ctx, name_r);
+      graphics_context_set_text_color(ctx, text_c);
+      graphics_draw_text(ctx, name, f_sm, name_r,
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+
+      char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
+      GRect dist_r = GRect(w/2-30, bot_y+20, 60, 18);
+      draw_pill(ctx, dist_r);
+      graphics_draw_text(ctx, dbuf, f_md, dist_r,
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    } else {
+      GRect nr = GRect(30, bot_y+4, w-60, 18);
+      draw_pill(ctx, nr);
+      graphics_context_set_text_color(ctx, dim_c);
+      graphics_draw_text(ctx, "Add in Settings", f_sm, nr,
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    }
   } else {
+    // Rect: 4 corners
+    // Top-left: date
     graphics_context_set_text_color(ctx, dim_c);
-    graphics_draw_text(ctx, "No waypoint", f_sm,
-      GRect(pad, bot_y, cx-pad, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-    graphics_draw_text(ctx, "Settings", f_sm,
-      GRect(cx, bot_y, cx-pad, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+    graphics_draw_text(ctx, dbuf_date, f_sm,
+      GRect(4, 4, w/2-4, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    // Top-right: time
+    graphics_context_set_text_color(ctx, text_c);
+    graphics_draw_text(ctx, tbuf, f_md,
+      GRect(w/2, 2, w/2-4, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+    // Bottom
+    if(has_dest) {
+      graphics_context_set_text_color(ctx, text_c);
+      graphics_draw_text(ctx, name, f_sm,
+        GRect(4, h-20, w/2-4, 18), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+      char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
+      graphics_draw_text(ctx, dbuf, f_md,
+        GRect(w/2, h-22, w/2-4, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+    } else {
+      graphics_context_set_text_color(ctx, dim_c);
+      graphics_draw_text(ctx, "Add waypoints in Settings", f_sm,
+        GRect(4, h-18, w-8, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    }
   }
 }
 
@@ -306,63 +337,6 @@ static void draw_classic(GContext *ctx, GRect b, float dest_bearing, float dist_
 
   // Info overlay
   draw_info(ctx, b, dist_m, name, has_dest, gold, gold_dk);
-}
-
-// ============================================================================
-// THEME: MINIMAL
-// ============================================================================
-static void draw_minimal(GContext *ctx, GRect b, float dest_bearing, float dist_m,
-                         const char *name, bool has_dest) {
-  int w=b.size.w, h=b.size.h, cx=w/2, cy=h/2;
-  int r = (w<h?w:h)/2 - 16;
-
-  graphics_context_set_fill_color(ctx, GColorBlack);
-  graphics_fill_rect(ctx, b, 0, GCornerNone);
-
-  // Thin circle with subtle ticks
-  graphics_context_set_stroke_color(ctx, GColorLightGray);
-  graphics_context_set_stroke_width(ctx, 1);
-  graphics_draw_circle(ctx, GPoint(cx,cy), r);
-  for(int d=0; d<360; d+=90) {
-    float a = d - s_heading;
-    int x1 = cx + (int)(r * psin(a));
-    int y1 = cy - (int)(r * pcos(a));
-    int x2 = cx + (int)((r-8) * psin(a));
-    int y2 = cy - (int)((r-8) * pcos(a));
-    graphics_draw_line(ctx, GPoint(x1,y1), GPoint(x2,y2));
-  }
-
-  // N/S/E/W
-  GFont f_dir = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  const char *dirs[] = {"N","E","S","W"};
-  float dir_az[] = {0,90,180,270};
-  for(int i=0; i<4; i++) {
-    float a = dir_az[i] - s_heading;
-    int dx = cx + (int)((r-18) * psin(a));
-    int dy = cy - (int)((r-18) * pcos(a));
-    graphics_context_set_text_color(ctx, (i==0)?GColorWhite:GColorLightGray);
-    graphics_draw_text(ctx, dirs[i], f_dir,
-      GRect(dx-8,dy-10,16,20), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-  }
-
-  // Destination: thin line with arrow dot
-  if(has_dest) {
-    float a = dest_bearing - s_heading;
-    int tx = cx + (int)((r-6) * psin(a));
-    int ty = cy - (int)((r-6) * pcos(a));
-    graphics_context_set_stroke_color(ctx, GColorWhite);
-    graphics_context_set_stroke_width(ctx, 2);
-    graphics_draw_line(ctx, GPoint(cx,cy), GPoint(tx,ty));
-    graphics_context_set_fill_color(ctx, GColorWhite);
-    graphics_fill_circle(ctx, GPoint(tx,ty), 5);
-  }
-
-  // Center
-  graphics_context_set_fill_color(ctx, GColorWhite);
-  graphics_fill_circle(ctx, GPoint(cx,cy), 2);
-
-  // Info
-  draw_info(ctx, b, dist_m, name, has_dest, GColorWhite, GColorLightGray);
 }
 
 // ============================================================================
@@ -569,7 +543,6 @@ static void canvas_proc(Layer *l, GContext *ctx) {
   // Draw selected theme
   switch(s_theme) {
     case THEME_CLASSIC:  draw_classic(ctx, b, dest_bearing, dist_m, dest_name, has_dest); break;
-    case THEME_MINIMAL:  draw_minimal(ctx, b, dest_bearing, dist_m, dest_name, has_dest); break;
     case THEME_TECH:     draw_tech(ctx, b, dest_bearing, dist_m, dest_name, has_dest); break;
     case THEME_PREMIUM:  draw_premium(ctx, b, dest_bearing, dist_m, dest_name, has_dest); break;
     default:             draw_classic(ctx, b, dest_bearing, dist_m, dest_name, has_dest); break;

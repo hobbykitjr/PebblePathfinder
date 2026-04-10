@@ -78,10 +78,10 @@
     <div class="toggle-group">
       <input type="radio" name="theme" id="themeClassic" value="0">
       <label for="themeClassic">Classic</label>
-      <input type="radio" name="theme" id="themeMinimal" value="1">
-      <label for="themeMinimal">Minimal</label>
-      <input type="radio" name="theme" id="themeTech" value="2">
+      <input type="radio" name="theme" id="themeTech" value="1">
       <label for="themeTech">Tech</label>
+      <input type="radio" name="theme" id="themePremium" value="2">
+      <label for="themePremium">Premium</label>
     </div>
   </div>
 
@@ -103,7 +103,7 @@
       document.getElementById('unit' + (s.unit===1?'Km':'Mi')).checked = true;
       var pollIds = ['pollManual','pollLow','pollMed','pollHigh'];
       document.getElementById(pollIds[s.poll||2]).checked = true;
-      var themeIds = ['themeClassic','themeMinimal','themeTech'];
+      var themeIds = ['themeClassic','themeTech','themePremium'];
       document.getElementById(themeIds[s.theme||0]).checked = true;
     } catch(e) {
       document.getElementById('unitMi').checked = true;
