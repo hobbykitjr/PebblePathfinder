@@ -101,15 +101,22 @@ static float bearing(float lat1, float lon1, float lat2, float lon2) {
   return deg;
 }
 
-// Format distance string
+// Format distance string (no %f — Pebble doesn't support it)
 static void fmt_dist(char *buf, int sz, float meters) {
   if(s_unit == UNIT_KM) {
-    if(meters < 500) snprintf(buf, sz, "%dm", (int)meters);
-    else snprintf(buf, sz, "%.1fkm", meters/1000.0f);
+    if(meters < 500) {
+      snprintf(buf, sz, "%dm", (int)meters);
+    } else {
+      int km10 = (int)(meters / 100.0f);  // km * 10
+      snprintf(buf, sz, "%d.%dkm", km10/10, km10%10);
+    }
   } else {
-    float mi = meters / 1609.34f;
-    if(meters < 200) snprintf(buf, sz, "%dft", (int)(meters*3.281f));
-    else snprintf(buf, sz, "%.1fmi", mi);
+    if(meters < 200) {
+      snprintf(buf, sz, "%dft", (int)(meters*3.281f));
+    } else {
+      int mi10 = (int)(meters / 160.934f);  // miles * 10
+      snprintf(buf, sz, "%d.%dmi", mi10/10, mi10%10);
+    }
   }
 }
 
@@ -164,107 +171,139 @@ static void draw_needle(GContext *ctx, int cx, int cy, int len, float angle, GCo
 }
 
 // ============================================================================
+// SHARED: time + info drawing
+// ============================================================================
+static void draw_info(GContext *ctx, GRect b, float dist_m, const char *name,
+                      bool has_dest, GColor text_c, GColor dim_c) {
+  int w=b.size.w, h=b.size.h;
+  bool rnd = (w==h);  // Round display
+
+  time_t now = time(NULL);
+  struct tm *tm = localtime(&now);
+  char tbuf[8], dbuf_date[12];
+  strftime(tbuf, sizeof(tbuf), clock_is_24h_style()?"%H:%M":"%I:%M", tm);
+  strftime(dbuf_date, sizeof(dbuf_date), "%a %b %d", tm);
+
+  GFont f_lg = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+  GFont f_md = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+
+  if(rnd) {
+    // Round: time at top center, name+dist at bottom center
+    graphics_context_set_text_color(ctx, text_c);
+    graphics_draw_text(ctx, tbuf, f_md,
+      GRect(0, 6, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+
+    if(has_dest) {
+      graphics_draw_text(ctx, name, f_lg,
+        GRect(10, h*40/100, w-20, 32), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+      char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
+      graphics_draw_text(ctx, dbuf, f_md,
+        GRect(0, h*40/100+30, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    } else {
+      graphics_context_set_text_color(ctx, dim_c);
+      graphics_draw_text(ctx, "No waypoint", f_md,
+        GRect(0, h*42/100, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+      graphics_draw_text(ctx, "Add in Settings", f_sm,
+        GRect(0, h*42/100+22, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    }
+  } else {
+    // Rect: date+time top corners, name+dist bottom corners
+    graphics_context_set_text_color(ctx, dim_c);
+    graphics_draw_text(ctx, dbuf_date, f_sm,
+      GRect(4, 4, w/2, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_context_set_text_color(ctx, text_c);
+    graphics_draw_text(ctx, tbuf, f_md,
+      GRect(w/2, 2, w/2-4, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+
+    if(has_dest) {
+      graphics_draw_text(ctx, name, f_md,
+        GRect(4, h-22, w/2, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+      char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
+      graphics_draw_text(ctx, dbuf, f_md,
+        GRect(w/2, h-22, w/2-4, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+    } else {
+      graphics_context_set_text_color(ctx, dim_c);
+      graphics_draw_text(ctx, "No waypoint — Settings to add", f_sm,
+        GRect(4, h-18, w-8, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    }
+  }
+}
+
+// ============================================================================
 // THEME: CLASSIC
 // ============================================================================
 static void draw_classic(GContext *ctx, GRect b, float dest_bearing, float dist_m,
                          const char *name, bool has_dest) {
   int w=b.size.w, h=b.size.h, cx=w/2, cy=h/2;
-  int r = (w<h?w:h)/2 - 20;
+  int r = (w<h?w:h)/2 - 16;
 
   // Warm background
   #ifdef PBL_COLOR
   graphics_context_set_fill_color(ctx, GColorFromHEX(0x2a1a0a));
+  GColor gold = GColorFromHEX(0xCCAA66);
+  GColor gold_dk = GColorFromHEX(0x886622);
   #else
   graphics_context_set_fill_color(ctx, GColorBlack);
+  GColor gold = GColorWhite;
+  GColor gold_dk = GColorLightGray;
   #endif
   graphics_fill_rect(ctx, b, 0, GCornerNone);
 
-  // Compass circle
-  #ifdef PBL_COLOR
-  graphics_context_set_stroke_color(ctx, GColorFromHEX(0x886622));
-  #else
-  graphics_context_set_stroke_color(ctx, GColorWhite);
-  #endif
+  // Double compass circle
+  graphics_context_set_stroke_color(ctx, gold_dk);
   graphics_context_set_stroke_width(ctx, 2);
   graphics_draw_circle(ctx, GPoint(cx,cy), r);
-  graphics_draw_circle(ctx, GPoint(cx,cy), r-3);
+  graphics_context_set_stroke_width(ctx, 1);
+  graphics_draw_circle(ctx, GPoint(cx,cy), r-4);
 
   // Degree ticks
-  graphics_context_set_stroke_width(ctx, 1);
-  for(int d=0; d<360; d+=30) {
+  for(int d=0; d<360; d+=10) {
     float a = d - s_heading;
-    int inner = (d%90==0) ? r-12 : r-8;
+    int inner = (d%90==0) ? r-14 : (d%30==0) ? r-10 : r-6;
     int x1 = cx + (int)(inner * psin(a));
     int y1 = cy - (int)(inner * pcos(a));
-    int x2 = cx + (int)((r-4) * psin(a));
-    int y2 = cy - (int)((r-4) * pcos(a));
+    int x2 = cx + (int)((r-5) * psin(a));
+    int y2 = cy - (int)((r-5) * pcos(a));
+    graphics_context_set_stroke_color(ctx, (d%30==0)?gold:gold_dk);
     graphics_draw_line(ctx, GPoint(x1,y1), GPoint(x2,y2));
   }
 
   // Cardinal directions
-  GFont f_dir = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  GFont f_dir = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
   const char *dirs[] = {"N","E","S","W"};
   float dir_az[] = {0,90,180,270};
   for(int i=0; i<4; i++) {
     float a = dir_az[i] - s_heading;
-    int dx = cx + (int)((r-20) * psin(a));
-    int dy = cy - (int)((r-20) * pcos(a));
+    int dx = cx + (int)((r-24) * psin(a));
+    int dy = cy - (int)((r-24) * pcos(a));
     #ifdef PBL_COLOR
-    graphics_context_set_text_color(ctx, (i==0)?GColorRed:GColorFromHEX(0xCCAA66));
+    graphics_context_set_text_color(ctx, (i==0)?GColorRed:gold);
     #else
     graphics_context_set_text_color(ctx, GColorWhite);
     #endif
     graphics_draw_text(ctx, dirs[i], f_dir,
-      GRect(dx-8,dy-10,16,20), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+      GRect(dx-10,dy-14,20,28), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 
   // Destination needle
   if(has_dest) {
-    float needle_angle = dest_bearing - s_heading;
+    float na = dest_bearing - s_heading;
     #ifdef PBL_COLOR
-    draw_needle(ctx, cx, cy, r-28, needle_angle, GColorRed);
+    draw_needle(ctx, cx, cy, r-32, na, GColorRed);
     #else
-    draw_needle(ctx, cx, cy, r-28, needle_angle, GColorWhite);
+    draw_needle(ctx, cx, cy, r-32, na, GColorWhite);
     #endif
   }
 
   // Center dot
-  #ifdef PBL_COLOR
-  graphics_context_set_fill_color(ctx, GColorFromHEX(0x886622));
-  #else
-  graphics_context_set_fill_color(ctx, GColorWhite);
-  #endif
-  graphics_fill_circle(ctx, GPoint(cx,cy), 4);
+  graphics_context_set_fill_color(ctx, gold_dk);
+  graphics_fill_circle(ctx, GPoint(cx,cy), 5);
+  graphics_context_set_fill_color(ctx, gold);
+  graphics_fill_circle(ctx, GPoint(cx,cy), 3);
 
-  // Time at top
-  GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
-  time_t now = time(NULL);
-  struct tm *tm = localtime(&now);
-  char tbuf[8];
-  strftime(tbuf, sizeof(tbuf), clock_is_24h_style()?"%H:%M":"%I:%M", tm);
-  #ifdef PBL_COLOR
-  graphics_context_set_text_color(ctx, GColorFromHEX(0xCCAA66));
-  #else
-  graphics_context_set_text_color(ctx, GColorWhite);
-  #endif
-  graphics_draw_text(ctx, tbuf, f_sm,
-    GRect(0, 4, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-
-  // Location name + distance at bottom
-  GFont f_md = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  if(has_dest) {
-    graphics_draw_text(ctx, name, f_md,
-      GRect(0, h-42, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-    char dbuf[16];
-    fmt_dist(dbuf, sizeof(dbuf), dist_m);
-    graphics_draw_text(ctx, dbuf, f_md,
-      GRect(0, h-24, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-  } else {
-    graphics_draw_text(ctx, "No waypoint set", f_sm,
-      GRect(0, h-30, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-    graphics_draw_text(ctx, "Configure in Settings", f_sm,
-      GRect(0, h-16, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-  }
+  // Info overlay
+  draw_info(ctx, b, dist_m, name, has_dest, gold, gold_dk);
 }
 
 // ============================================================================
@@ -273,68 +312,55 @@ static void draw_classic(GContext *ctx, GRect b, float dest_bearing, float dist_
 static void draw_minimal(GContext *ctx, GRect b, float dest_bearing, float dist_m,
                          const char *name, bool has_dest) {
   int w=b.size.w, h=b.size.h, cx=w/2, cy=h/2;
-  int r = (w<h?w:h)/2 - 20;
+  int r = (w<h?w:h)/2 - 16;
 
   graphics_context_set_fill_color(ctx, GColorBlack);
   graphics_fill_rect(ctx, b, 0, GCornerNone);
 
-  // Thin circle
-  graphics_context_set_stroke_color(ctx, GColorWhite);
+  // Thin circle with subtle ticks
+  graphics_context_set_stroke_color(ctx, GColorLightGray);
   graphics_context_set_stroke_width(ctx, 1);
   graphics_draw_circle(ctx, GPoint(cx,cy), r);
+  for(int d=0; d<360; d+=90) {
+    float a = d - s_heading;
+    int x1 = cx + (int)(r * psin(a));
+    int y1 = cy - (int)(r * pcos(a));
+    int x2 = cx + (int)((r-8) * psin(a));
+    int y2 = cy - (int)((r-8) * pcos(a));
+    graphics_draw_line(ctx, GPoint(x1,y1), GPoint(x2,y2));
+  }
 
   // N/S/E/W
-  GFont f_dir = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  GFont f_dir = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
   const char *dirs[] = {"N","E","S","W"};
   float dir_az[] = {0,90,180,270};
   for(int i=0; i<4; i++) {
     float a = dir_az[i] - s_heading;
-    int dx = cx + (int)((r+10) * psin(a));
-    int dy = cy - (int)((r+10) * pcos(a));
-    graphics_context_set_text_color(ctx, GColorWhite);
+    int dx = cx + (int)((r-18) * psin(a));
+    int dy = cy - (int)((r-18) * pcos(a));
+    graphics_context_set_text_color(ctx, (i==0)?GColorWhite:GColorLightGray);
     graphics_draw_text(ctx, dirs[i], f_dir,
-      GRect(dx-6,dy-8,12,16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+      GRect(dx-8,dy-10,16,20), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 
-  // Destination needle (thin line)
+  // Destination: thin line with arrow dot
   if(has_dest) {
     float a = dest_bearing - s_heading;
-    int tx = cx + (int)((r-8) * psin(a));
-    int ty = cy - (int)((r-8) * pcos(a));
+    int tx = cx + (int)((r-6) * psin(a));
+    int ty = cy - (int)((r-6) * pcos(a));
     graphics_context_set_stroke_color(ctx, GColorWhite);
     graphics_context_set_stroke_width(ctx, 2);
     graphics_draw_line(ctx, GPoint(cx,cy), GPoint(tx,ty));
     graphics_context_set_fill_color(ctx, GColorWhite);
-    graphics_fill_circle(ctx, GPoint(tx,ty), 4);
+    graphics_fill_circle(ctx, GPoint(tx,ty), 5);
   }
 
-  // Center dot
+  // Center
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_fill_circle(ctx, GPoint(cx,cy), 2);
 
-  // Time
-  GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
-  time_t now = time(NULL);
-  struct tm *tm = localtime(&now);
-  char tbuf[8];
-  strftime(tbuf, sizeof(tbuf), clock_is_24h_style()?"%H:%M":"%I:%M", tm);
-  graphics_context_set_text_color(ctx, GColorLightGray);
-  graphics_draw_text(ctx, tbuf, f_sm,
-    GRect(0, 4, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-
-  // Name + distance
-  GFont f_md = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  graphics_context_set_text_color(ctx, GColorWhite);
-  if(has_dest) {
-    graphics_draw_text(ctx, name, f_md,
-      GRect(0, h-42, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-    char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
-    graphics_draw_text(ctx, dbuf, f_sm,
-      GRect(0, h-22, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-  } else {
-    graphics_draw_text(ctx, "No waypoint", f_sm,
-      GRect(0, h-24, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-  }
+  // Info
+  draw_info(ctx, b, dist_m, name, has_dest, GColorWhite, GColorLightGray);
 }
 
 // ============================================================================
@@ -343,20 +369,20 @@ static void draw_minimal(GContext *ctx, GRect b, float dest_bearing, float dist_
 static void draw_tech(GContext *ctx, GRect b, float dest_bearing, float dist_m,
                       const char *name, bool has_dest) {
   int w=b.size.w, h=b.size.h, cx=w/2, cy=h/2;
-  int r = (w<h?w:h)/2 - 20;
+  int r = (w<h?w:h)/2 - 16;
 
   graphics_context_set_fill_color(ctx, GColorBlack);
   graphics_fill_rect(ctx, b, 0, GCornerNone);
 
   #ifdef PBL_COLOR
-  GColor gc = GColorFromHEX(0x00AA00);
-  GColor gcd = GColorFromHEX(0x004400);
+  GColor gc = GColorFromHEX(0x00CC00);
+  GColor gcd = GColorFromHEX(0x003300);
   #else
   GColor gc = GColorWhite;
   GColor gcd = GColorDarkGray;
   #endif
 
-  // Grid crosshair
+  // Grid
   graphics_context_set_stroke_color(ctx, gcd);
   graphics_context_set_stroke_width(ctx, 1);
   graphics_draw_line(ctx, GPoint(cx,cy-r), GPoint(cx,cy+r));
@@ -364,27 +390,28 @@ static void draw_tech(GContext *ctx, GRect b, float dest_bearing, float dist_m,
   graphics_draw_circle(ctx, GPoint(cx,cy), r/3);
   graphics_draw_circle(ctx, GPoint(cx,cy), r*2/3);
 
-  // Compass ring with degree numbers
+  // Compass ring
   graphics_context_set_stroke_color(ctx, gc);
   graphics_draw_circle(ctx, GPoint(cx,cy), r);
+
+  // Degree ticks + numbers
   GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
   for(int d=0; d<360; d+=30) {
     float a = d - s_heading;
-    int tx = cx + (int)((r-14) * psin(a));
-    int ty = cy - (int)((r-14) * pcos(a));
-    char dbuf[4]; snprintf(dbuf, sizeof(dbuf), "%d", d);
+    int tx = cx + (int)((r-16) * psin(a));
+    int ty = cy - (int)((r-16) * pcos(a));
+    char dbuf[4]; snprintf(dbuf, sizeof(dbuf), "%03d", d);
     graphics_context_set_text_color(ctx, gc);
     graphics_draw_text(ctx, dbuf, f_sm,
-      GRect(tx-12,ty-8,24,16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-    // Tick
+      GRect(tx-14,ty-8,28,16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
     int ix = cx + (int)(r * psin(a));
     int iy = cy - (int)(r * pcos(a));
-    int ox = cx + (int)((r-4) * psin(a));
-    int oy = cy - (int)((r-4) * pcos(a));
+    int ox = cx + (int)((r-5) * psin(a));
+    int oy = cy - (int)((r-5) * pcos(a));
     graphics_draw_line(ctx, GPoint(ix,iy), GPoint(ox,oy));
   }
 
-  // Destination bearing line
+  // Bearing line to destination
   if(has_dest) {
     float a = dest_bearing - s_heading;
     int tx = cx + (int)((r-4) * psin(a));
@@ -392,43 +419,26 @@ static void draw_tech(GContext *ctx, GRect b, float dest_bearing, float dist_m,
     graphics_context_set_stroke_color(ctx, gc);
     graphics_context_set_stroke_width(ctx, 3);
     graphics_draw_line(ctx, GPoint(cx,cy), GPoint(tx,ty));
+    // Arrow tip
+    graphics_context_set_fill_color(ctx, gc);
+    graphics_fill_circle(ctx, GPoint(tx,ty), 4);
     graphics_context_set_stroke_width(ctx, 1);
   }
 
-  // Heading readout
+  // Heading + bearing readout in center
   GFont f_lg = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
-  char hbuf[8]; snprintf(hbuf, sizeof(hbuf), "%03d", (int)s_heading);
   graphics_context_set_text_color(ctx, gc);
-  graphics_draw_text(ctx, hbuf, f_lg,
-    GRect(0, 2, w, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-
-  // Bearing to destination
+  char hbuf[16]; snprintf(hbuf, sizeof(hbuf), "HDG %03d", (int)s_heading);
+  graphics_draw_text(ctx, hbuf, f_sm,
+    GRect(0, cy-20, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   if(has_dest) {
     char bbuf[16]; snprintf(bbuf, sizeof(bbuf), "BRG %03d", (int)dest_bearing);
     graphics_draw_text(ctx, bbuf, f_sm,
-      GRect(0, h-56, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+      GRect(0, cy+4, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 
-  // Name + distance
-  GFont f_md = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  if(has_dest) {
-    graphics_draw_text(ctx, name, f_md,
-      GRect(0, h-40, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-    char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
-    graphics_draw_text(ctx, dbuf, f_md,
-      GRect(0, h-22, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-  } else {
-    graphics_draw_text(ctx, "NO TARGET", f_md,
-      GRect(0, h-30, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-  }
-
-  // Time
-  time_t now = time(NULL);
-  struct tm *tm = localtime(&now);
-  char tbuf[8];
-  strftime(tbuf, sizeof(tbuf), clock_is_24h_style()?"%H:%M":"%I:%M", tm);
-  graphics_draw_text(ctx, tbuf, f_sm,
-    GRect(0, h-12, w, 14), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  // Info overlay
+  draw_info(ctx, b, dist_m, name, has_dest, gc, gcd);
 }
 
 // ============================================================================
