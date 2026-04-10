@@ -404,16 +404,20 @@ static void draw_tech(GContext *ctx, GRect b, float dest_bearing, float dist_m,
   graphics_context_set_stroke_color(ctx, gc);
   graphics_draw_circle(ctx, GPoint(cx,cy), r);
 
-  // Degree ticks + numbers
+  // Degree ticks + numbers (skip labels in corners on rect)
   GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
   for(int d=0; d<360; d+=30) {
     float a = d - s_heading;
     int tx = cx + (int)((r-16) * psin(a));
     int ty = cy - (int)((r-16) * pcos(a));
-    char dbuf[4]; snprintf(dbuf, sizeof(dbuf), "%03d", d);
-    graphics_context_set_text_color(ctx, gc);
-    graphics_draw_text(ctx, dbuf, f_sm,
-      GRect(tx-14,ty-8,28,16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    // Skip degree labels near corners (where date/time/name/dist go)
+    bool in_corner = (!rnd && ((tx<50&&ty<24)||(tx>w-50&&ty<24)||(tx<50&&ty>h-24)||(tx>w-50&&ty>h-24)));
+    if(!in_corner) {
+      char dbuf2[4]; snprintf(dbuf2, sizeof(dbuf2), "%03d", d);
+      graphics_context_set_text_color(ctx, gc);
+      graphics_draw_text(ctx, dbuf2, f_sm,
+        GRect(tx-14,ty-8,28,16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    }
     int ix = cx + (int)(r * psin(a));
     int iy = cy - (int)(r * pcos(a));
     int ox = cx + (int)((r-5) * psin(a));
