@@ -4,7 +4,7 @@ var settings = {
   unit: 0,      // 0=mi, 1=km
   theme: 0,     // 0=classic, 1=minimal, 2=tech
   poll: 2,      // 0=manual, 1=low, 2=med, 3=high
-  locations: [] // [{name, lat, lon}, ...]
+  locations: [{name:"Lady Liberty", lat:40.6892, lon:-74.0475, addr:"Statue of Liberty"}]
 };
 
 // ============================================================================

@@ -139,12 +139,21 @@ static void load_settings(void) {
   if(persist_exists(P_UNIT)) s_unit = persist_read_int(P_UNIT);
   if(persist_exists(P_THEME)) s_theme = persist_read_int(P_THEME);
   if(persist_exists(P_POLL)) s_poll = persist_read_int(P_POLL);
-  if(persist_exists(P_LOC_CNT)) s_loc_count = persist_read_int(P_LOC_CNT);
-  for(int i=0; i<s_loc_count && i<MAX_LOCS; i++) {
-    if(persist_exists(P_LOC_BASE+i)) s_locs[i].lat = persist_read_int(P_LOC_BASE+i);
-    if(persist_exists(P_LOC_BASE+10+i)) s_locs[i].lon = persist_read_int(P_LOC_BASE+10+i);
-    if(persist_exists(P_LOC_BASE+20+i)) persist_read_string(P_LOC_BASE+20+i, s_locs[i].name, NAME_LEN);
-    s_locs[i].valid = true;
+  if(persist_exists(P_LOC_CNT)) {
+    s_loc_count = persist_read_int(P_LOC_CNT);
+    for(int i=0; i<s_loc_count && i<MAX_LOCS; i++) {
+      if(persist_exists(P_LOC_BASE+i)) s_locs[i].lat = persist_read_int(P_LOC_BASE+i);
+      if(persist_exists(P_LOC_BASE+10+i)) s_locs[i].lon = persist_read_int(P_LOC_BASE+10+i);
+      if(persist_exists(P_LOC_BASE+20+i)) persist_read_string(P_LOC_BASE+20+i, s_locs[i].name, NAME_LEN);
+      s_locs[i].valid = true;
+    }
+  } else {
+    // Default location: Statue of Liberty
+    s_loc_count = 1;
+    s_locs[0].lat = 406892;   // 40.6892 * 10000
+    s_locs[0].lon = -740475;  // -74.0475 * 10000
+    snprintf(s_locs[0].name, NAME_LEN, "Lady Liberty");
+    s_locs[0].valid = true;
   }
 }
 
@@ -171,12 +180,12 @@ static void draw_needle(GContext *ctx, int cx, int cy, int len, float angle, GCo
 }
 
 // ============================================================================
-// SHARED: time + info drawing
+// SHARED: 4-quadrant info overlay (date/time top, name/dist bottom)
 // ============================================================================
 static void draw_info(GContext *ctx, GRect b, float dist_m, const char *name,
                       bool has_dest, GColor text_c, GColor dim_c) {
-  int w=b.size.w, h=b.size.h;
-  bool rnd = (w==h);  // Round display
+  int w=b.size.w, h=b.size.h, cx=w/2, cy=h/2;
+  bool rnd = (w==h);
 
   time_t now = time(NULL);
   struct tm *tm = localtime(&now);
@@ -184,49 +193,40 @@ static void draw_info(GContext *ctx, GRect b, float dist_m, const char *name,
   strftime(tbuf, sizeof(tbuf), clock_is_24h_style()?"%H:%M":"%I:%M", tm);
   strftime(dbuf_date, sizeof(dbuf_date), "%a %b %d", tm);
 
-  GFont f_lg = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
   GFont f_md = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
   GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
 
-  if(rnd) {
-    // Round: time at top center, name+dist at bottom center
-    graphics_context_set_text_color(ctx, text_c);
-    graphics_draw_text(ctx, tbuf, f_md,
-      GRect(0, 6, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  // Insets for round display (text inside compass circle)
+  int pad = rnd ? 24 : 4;
+  int top_y = rnd ? 28 : 4;
+  int bot_y = rnd ? h-44 : h-22;
 
-    if(has_dest) {
-      graphics_draw_text(ctx, name, f_lg,
-        GRect(10, h*40/100, w-20, 32), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-      char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
-      graphics_draw_text(ctx, dbuf, f_md,
-        GRect(0, h*40/100+30, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-    } else {
-      graphics_context_set_text_color(ctx, dim_c);
-      graphics_draw_text(ctx, "No waypoint", f_md,
-        GRect(0, h*42/100, w, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-      graphics_draw_text(ctx, "Add in Settings", f_sm,
-        GRect(0, h*42/100+22, w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-    }
+  // Top-left: date
+  graphics_context_set_text_color(ctx, dim_c);
+  graphics_draw_text(ctx, dbuf_date, f_sm,
+    GRect(pad, top_y, cx-pad, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+
+  // Top-right: time
+  graphics_context_set_text_color(ctx, text_c);
+  graphics_draw_text(ctx, tbuf, f_md,
+    GRect(cx, top_y-2, cx-pad, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+
+  // Bottom: name + distance
+  if(has_dest) {
+    // Bottom-left: name
+    graphics_context_set_text_color(ctx, text_c);
+    graphics_draw_text(ctx, name, f_md,
+      GRect(pad, bot_y, cx-pad, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    // Bottom-right: distance
+    char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
+    graphics_draw_text(ctx, dbuf, f_md,
+      GRect(cx, bot_y, cx-pad, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
   } else {
-    // Rect: date+time top corners, name+dist bottom corners
     graphics_context_set_text_color(ctx, dim_c);
-    graphics_draw_text(ctx, dbuf_date, f_sm,
-      GRect(4, 4, w/2, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-    graphics_context_set_text_color(ctx, text_c);
-    graphics_draw_text(ctx, tbuf, f_md,
-      GRect(w/2, 2, w/2-4, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
-
-    if(has_dest) {
-      graphics_draw_text(ctx, name, f_md,
-        GRect(4, h-22, w/2, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-      char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
-      graphics_draw_text(ctx, dbuf, f_md,
-        GRect(w/2, h-22, w/2-4, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
-    } else {
-      graphics_context_set_text_color(ctx, dim_c);
-      graphics_draw_text(ctx, "No waypoint — Settings to add", f_sm,
-        GRect(4, h-18, w-8, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-    }
+    graphics_draw_text(ctx, "No waypoint", f_sm,
+      GRect(pad, bot_y, cx-pad, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_draw_text(ctx, "Settings", f_sm,
+      GRect(cx, bot_y, cx-pad, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
   }
 }
 
