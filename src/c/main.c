@@ -25,7 +25,8 @@
 #define P_LOC_BASE 10  // 10-15=lat, 20-25=lon, 30-35=name
 
 // Themes
-enum { THEME_CLASSIC=0, THEME_MINIMAL, THEME_TECH };
+enum { THEME_CLASSIC=0, THEME_MINIMAL, THEME_TECH, THEME_PREMIUM };
+#define NUM_THEMES 4
 
 // Units
 enum { UNIT_MI=0, UNIT_KM };
@@ -66,6 +67,7 @@ static int s_steps_at_gps = 0;     // Step count at last GPS update
 static float s_step_dist = 0.7f;   // Meters per step estimate
 
 static AppTimer *s_gps_timer = NULL;
+static GBitmap *s_compass_bmp = NULL;
 
 // ============================================================================
 // MATH
@@ -442,6 +444,93 @@ static void draw_tech(GContext *ctx, GRect b, float dest_bearing, float dist_m,
 }
 
 // ============================================================================
+// THEME: PREMIUM (bitmap compass face + drawn elements)
+// ============================================================================
+static void draw_premium(GContext *ctx, GRect b, float dest_bearing, float dist_m,
+                         const char *name, bool has_dest) {
+  int w=b.size.w, h=b.size.h, cx=w/2, cy=h/2;
+  int r = (w<h?w:h)/2 - 8;
+
+  // Black background
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(ctx, b, 0, GCornerNone);
+
+  // Draw compass face bitmap
+  if(s_compass_bmp) {
+    GRect src = gbitmap_get_bounds(s_compass_bmp);
+    int bw = src.size.w, bh = src.size.h;
+    graphics_draw_bitmap_in_rect(ctx, s_compass_bmp,
+      GRect(cx-bw/2, cy-bh/2, bw, bh));
+  }
+
+  // Degree ticks (rotate with heading)
+  #ifdef PBL_COLOR
+  GColor gold = GColorFromHEX(0xCCAA66);
+  GColor gold_dk = GColorFromHEX(0x886622);
+  #else
+  GColor gold = GColorWhite;
+  GColor gold_dk = GColorLightGray;
+  #endif
+
+  graphics_context_set_stroke_width(ctx, 1);
+  for(int d=0; d<360; d+=10) {
+    float a = d - s_heading;
+    int inner = (d%90==0) ? r-16 : (d%30==0) ? r-12 : r-8;
+    int x1 = cx + (int)(inner * psin(a));
+    int y1 = cy - (int)(inner * pcos(a));
+    int x2 = cx + (int)((r-4) * psin(a));
+    int y2 = cy - (int)((r-4) * pcos(a));
+    graphics_context_set_stroke_color(ctx, (d%30==0)?gold:gold_dk);
+    graphics_draw_line(ctx, GPoint(x1,y1), GPoint(x2,y2));
+  }
+
+  // Cardinal directions (larger, bold)
+  GFont f_dir = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+  const char *dirs[] = {"N","E","S","W"};
+  float dir_az[] = {0,90,180,270};
+  for(int i=0; i<4; i++) {
+    float a = dir_az[i] - s_heading;
+    int dx = cx + (int)((r-30) * psin(a));
+    int dy = cy - (int)((r-30) * pcos(a));
+    #ifdef PBL_COLOR
+    graphics_context_set_text_color(ctx, (i==0)?GColorRed:gold);
+    #else
+    graphics_context_set_text_color(ctx, GColorWhite);
+    #endif
+    graphics_draw_text(ctx, dirs[i], f_dir,
+      GRect(dx-12,dy-16,24,32), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+
+  // Intercardinal labels (NE, SE, SW, NW)
+  GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  const char *idirs[] = {"NE","SE","SW","NW"};
+  float idir_az[] = {45,135,225,315};
+  for(int i=0; i<4; i++) {
+    float a = idir_az[i] - s_heading;
+    int dx = cx + (int)((r-22) * psin(a));
+    int dy = cy - (int)((r-22) * pcos(a));
+    graphics_context_set_text_color(ctx, gold_dk);
+    graphics_draw_text(ctx, idirs[i], f_sm,
+      GRect(dx-10,dy-8,20,16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+
+  // Destination needle (thick, red with shadow)
+  if(has_dest) {
+    float na = dest_bearing - s_heading;
+    // Shadow
+    #ifdef PBL_COLOR
+    draw_needle(ctx, cx+1, cy+1, r-36, na, GColorFromHEX(0x220000));
+    draw_needle(ctx, cx, cy, r-36, na, GColorRed);
+    #else
+    draw_needle(ctx, cx, cy, r-36, na, GColorWhite);
+    #endif
+  }
+
+  // Info overlay
+  draw_info(ctx, b, dist_m, name, has_dest, gold, gold_dk);
+}
+
+// ============================================================================
 // CANVAS
 // ============================================================================
 static void canvas_proc(Layer *l, GContext *ctx) {
@@ -482,6 +571,7 @@ static void canvas_proc(Layer *l, GContext *ctx) {
     case THEME_CLASSIC:  draw_classic(ctx, b, dest_bearing, dist_m, dest_name, has_dest); break;
     case THEME_MINIMAL:  draw_minimal(ctx, b, dest_bearing, dist_m, dest_name, has_dest); break;
     case THEME_TECH:     draw_tech(ctx, b, dest_bearing, dist_m, dest_name, has_dest); break;
+    case THEME_PREMIUM:  draw_premium(ctx, b, dest_bearing, dist_m, dest_name, has_dest); break;
     default:             draw_classic(ctx, b, dest_bearing, dist_m, dest_name, has_dest); break;
   }
 
@@ -619,7 +709,7 @@ static void select_click(ClickRecognizerRef ref, void *ctx) {
 
 static void select_long(ClickRecognizerRef ref, void *ctx) {
   // Cycle theme
-  s_theme = (s_theme + 1) % 3;
+  s_theme = (s_theme + 1) % NUM_THEMES;
   save_settings();
   if(s_canvas) layer_mark_dirty(s_canvas);
 }
@@ -676,6 +766,12 @@ static void win_unload(Window *w) {
 // ============================================================================
 static void init(void) {
   load_settings();
+  // Load compass face bitmap
+  #ifdef PBL_PLATFORM_GABBRO
+  s_compass_bmp = gbitmap_create_with_resource(RESOURCE_ID_COMPASS_FACE);
+  #else
+  s_compass_bmp = gbitmap_create_with_resource(RESOURCE_ID_COMPASS_FACE_EMERY);
+  #endif
   s_win = window_create();
   window_set_background_color(s_win, GColorBlack);
   window_set_window_handlers(s_win, (WindowHandlers){.load=win_load, .unload=win_unload});
@@ -686,6 +782,7 @@ static void init(void) {
 
 static void deinit(void) {
   window_destroy(s_win);
+  if(s_compass_bmp) gbitmap_destroy(s_compass_bmp);
 }
 
 int main(void) { init(); app_event_loop(); deinit(); return 0; }

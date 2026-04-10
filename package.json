@@ -47,6 +47,18 @@
                     "name": "ICON",
                     "targetPlatforms": null,
                     "type": "bitmap"
+                },
+                {
+                    "file": "images/compass_face.png",
+                    "name": "COMPASS_FACE",
+                    "targetPlatforms": ["gabbro"],
+                    "type": "png"
+                },
+                {
+                    "file": "images/compass_face_emery.png",
+                    "name": "COMPASS_FACE_EMERY",
+                    "targetPlatforms": ["emery"],
+                    "type": "png"
                 }
             ]
         },
