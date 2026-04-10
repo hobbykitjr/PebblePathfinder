@@ -185,7 +185,7 @@ static void draw_pill(GContext *ctx, GRect r) {
 }
 
 static void draw_info(GContext *ctx, GRect b, float dist_m, const char *name,
-                      bool has_dest, GColor text_c, GColor dim_c) {
+                      bool has_dest, GColor text_c, GColor dim_c, bool use_pills) {
   int w=b.size.w, h=b.size.h;
   bool rnd = (w==h);
 
@@ -202,7 +202,7 @@ static void draw_info(GContext *ctx, GRect b, float dist_m, const char *name,
     // Round: 4 small circle bubbles in each quadrant of the compass
     int cx=w/2, cy=h/2;
     int qr = 28;   // Bubble radius
-    int qd = 46;   // Distance from center to bubble center (closer in)
+    int qd = 40;   // Distance from center to bubble center
     // Top-left: date
     int q1x=cx-qd, q1y=cy-qd;
     graphics_context_set_fill_color(ctx, GColorBlack);
@@ -263,25 +263,35 @@ static void draw_info(GContext *ctx, GRect b, float dist_m, const char *name,
   } else {
     // Rect: 4 corners
     // Top-left: date
+    GRect dl = GRect(4, 4, w/2-4, 16);
+    if(use_pills) draw_pill(ctx, dl);
     graphics_context_set_text_color(ctx, dim_c);
-    graphics_draw_text(ctx, dbuf_date, f_sm,
-      GRect(4, 4, w/2-4, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_draw_text(ctx, dbuf_date, f_sm, dl,
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
     // Top-right: time
+    GRect tr = GRect(w/2, 2, w/2-4, 22);
+    if(use_pills) draw_pill(ctx, tr);
     graphics_context_set_text_color(ctx, text_c);
-    graphics_draw_text(ctx, tbuf, f_md,
-      GRect(w/2, 2, w/2-4, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+    graphics_draw_text(ctx, tbuf, f_md, tr,
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
     // Bottom
     if(has_dest) {
+      GRect bl = GRect(4, h-20, w/2-4, 18);
+      if(use_pills) draw_pill(ctx, bl);
       graphics_context_set_text_color(ctx, text_c);
-      graphics_draw_text(ctx, name, f_sm,
-        GRect(4, h-20, w/2-4, 18), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+      graphics_draw_text(ctx, name, f_sm, bl,
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
       char dbuf[16]; fmt_dist(dbuf, sizeof(dbuf), dist_m);
-      graphics_draw_text(ctx, dbuf, f_md,
-        GRect(w/2, h-22, w/2-4, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+      GRect br = GRect(w/2, h-22, w/2-4, 22);
+      if(use_pills) draw_pill(ctx, br);
+      graphics_draw_text(ctx, dbuf, f_md, br,
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
     } else {
+      GRect nb = GRect(4, h-18, w-8, 16);
+      if(use_pills) draw_pill(ctx, nb);
       graphics_context_set_text_color(ctx, dim_c);
-      graphics_draw_text(ctx, "Add in Settings", f_sm,
-        GRect(4, h-18, w-8, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+      graphics_draw_text(ctx, "Add in Settings", f_sm, nb,
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
     }
   }
 }
@@ -359,7 +369,7 @@ static void draw_classic(GContext *ctx, GRect b, float dest_bearing, float dist_
   graphics_fill_circle(ctx, GPoint(cx,cy), 3);
 
   // Info overlay
-  draw_info(ctx, b, dist_m, name, has_dest, gold, gold_dk);
+  draw_info(ctx, b, dist_m, name, has_dest, gold, gold_dk, false);
 }
 
 // ============================================================================
@@ -437,7 +447,7 @@ static void draw_tech(GContext *ctx, GRect b, float dest_bearing, float dist_m,
   }
 
   // Info overlay
-  draw_info(ctx, b, dist_m, name, has_dest, gc, gcd);
+  draw_info(ctx, b, dist_m, name, has_dest, gc, gcd, true);
 }
 
 // ============================================================================
@@ -524,7 +534,7 @@ static void draw_premium(GContext *ctx, GRect b, float dest_bearing, float dist_
   }
 
   // Info overlay
-  draw_info(ctx, b, dist_m, name, has_dest, gold, gold_dk);
+  draw_info(ctx, b, dist_m, name, has_dest, gold, gold_dk, false);
 }
 
 // ============================================================================

@@ -76,12 +76,12 @@
   <div class="card">
     <h2>Display Theme</h2>
     <div class="toggle-group">
-      <input type="radio" name="theme" id="themeClassic" value="0">
-      <label for="themeClassic">Classic</label>
-      <input type="radio" name="theme" id="themeTech" value="1">
-      <label for="themeTech">Tech</label>
-      <input type="radio" name="theme" id="themePremium" value="2">
+      <input type="radio" name="theme" id="themePremium" value="0">
       <label for="themePremium">Premium</label>
+      <input type="radio" name="theme" id="themeClassic" value="1">
+      <label for="themeClassic">Classic</label>
+      <input type="radio" name="theme" id="themeTech" value="2">
+      <label for="themeTech">Tech</label>
     </div>
   </div>
 
@@ -103,8 +103,8 @@
       document.getElementById('unit' + (s.unit===1?'Km':'Mi')).checked = true;
       var pollIds = ['pollManual','pollLow','pollMed','pollHigh'];
       document.getElementById(pollIds[s.poll||2]).checked = true;
-      var themeIds = ['themeClassic','themeTech','themePremium'];
-      document.getElementById(themeIds[s.theme||0]).checked = true;
+      var themeIds = ['themePremium','themeClassic','themeTech'];
+      document.getElementById(themeIds[s.theme!==undefined?s.theme:0]).checked = true;
     } catch(e) {
       document.getElementById('unitMi').checked = true;
       document.getElementById('pollMed').checked = true;
