@@ -4,6 +4,7 @@ var settings = {
   unit: 0,      // 0=mi, 1=km
   theme: 0,     // 0=classic, 1=minimal, 2=tech
   poll: 2,      // 0=manual, 1=low, 2=med, 3=high
+  compass_mode: 0, // 0=traditional, 1=north-up
   locations: []
 };
 
@@ -53,7 +54,7 @@ function geocodeAddress(address, callback) {
 // SEND CONFIG TO WATCH
 // ============================================================================
 function sendConfig() {
-  var packed = settings.unit | (settings.theme << 2) | (settings.poll << 4);
+  var packed = settings.unit | (settings.theme << 2) | (settings.poll << 4) | (settings.compass_mode << 6);
   var msg = {
     'SETTINGS': packed,
     'LOC_COUNT': settings.locations.length
@@ -110,6 +111,7 @@ Pebble.addEventListener('webviewclosed', function(e) {
       if(config.unit !== undefined) settings.unit = parseInt(config.unit);
       if(config.theme !== undefined) settings.theme = parseInt(config.theme);
       if(config.poll !== undefined) settings.poll = parseInt(config.poll);
+      if(config.compass_mode !== undefined) settings.compass_mode = parseInt(config.compass_mode);
       if(config.locations) settings.locations = config.locations;
 
       saveSettings();

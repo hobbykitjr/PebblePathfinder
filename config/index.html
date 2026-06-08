@@ -85,6 +85,17 @@
     </div>
   </div>
 
+  <div class="card">
+    <h2>Compass Mode</h2>
+    <div class="toggle-group">
+      <input type="radio" name="compass_mode" id="cmodeTraditional" value="0">
+      <label for="cmodeTraditional">Traditional</label>
+      <input type="radio" name="compass_mode" id="cmodeNorthUp" value="1">
+      <label for="cmodeNorthUp">North-Up</label>
+    </div>
+    <p class="hint">Traditional: dial rotates, facing is up. North-Up: N stays at top, arrow shows heading.</p>
+  </div>
+
   <button class="btn btn-save" id="saveBtn">Save Settings</button>
   <button class="btn btn-cancel" id="cancelBtn">Cancel</button>
 
@@ -105,10 +116,13 @@
       document.getElementById(pollIds[s.poll||2]).checked = true;
       var themeIds = ['themePremium','themeClassic','themeTech'];
       document.getElementById(themeIds[s.theme!==undefined?s.theme:0]).checked = true;
+      var cmodeIds = ['cmodeTraditional','cmodeNorthUp'];
+      document.getElementById(cmodeIds[s.compass_mode||0]).checked = true;
     } catch(e) {
       document.getElementById('unitMi').checked = true;
       document.getElementById('pollMed').checked = true;
       document.getElementById('themeClassic').checked = true;
+      document.getElementById('cmodeTraditional').checked = true;
     }
 
     function renderLocations() {
@@ -155,6 +169,7 @@
       var unit = document.querySelector('input[name="unit"]:checked');
       var poll = document.querySelector('input[name="poll"]:checked');
       var theme = document.querySelector('input[name="theme"]:checked');
+      var compass_mode = document.querySelector('input[name="compass_mode"]:checked');
 
       // Geocode any locations that need it
       var pending = 0;
@@ -163,6 +178,7 @@
           unit: unit ? unit.value : '0',
           theme: theme ? theme.value : '0',
           poll: poll ? poll.value : '2',
+          compass_mode: compass_mode ? compass_mode.value : '0',
           locations: locations
         };
         returnResult(JSON.stringify(result));

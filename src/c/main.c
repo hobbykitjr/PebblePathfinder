@@ -22,6 +22,7 @@
 #define P_THEME    1
 #define P_POLL     2
 #define P_LOC_CNT  3
+#define P_CMODE    4
 #define P_LOC_BASE 10  // 10-15=lat, 20-25=lon, 30-35=name
 
 // Themes
@@ -34,6 +35,9 @@ enum { UNIT_MI=0, UNIT_KM };
 // Poll rates
 enum { POLL_MANUAL=0, POLL_LOW, POLL_MED, POLL_HIGH };
 static const int s_poll_sec[] = {0, 300, 120, 30};
+
+// Compass modes
+enum { COMPASS_TRADITIONAL=0, COMPASS_NORTHUP };
 
 // ============================================================================
 // DATA
@@ -62,6 +66,7 @@ static time_t s_gps_time = 0;      // Last GPS update time
 static int s_unit = UNIT_MI;
 static int s_theme = THEME_CLASSIC;
 static int s_poll = POLL_MED;
+static int s_compass_mode = COMPASS_TRADITIONAL;
 
 static int s_steps_at_gps = 0;     // Step count at last GPS update
 static float s_step_dist = 0.7f;   // Meters per step estimate
@@ -126,6 +131,7 @@ static void save_settings(void) {
   persist_write_int(P_UNIT, s_unit);
   persist_write_int(P_THEME, s_theme);
   persist_write_int(P_POLL, s_poll);
+  persist_write_int(P_CMODE, s_compass_mode);
   persist_write_int(P_LOC_CNT, s_loc_count);
   for(int i=0; i<s_loc_count; i++) {
     persist_write_int(P_LOC_BASE+i, s_locs[i].lat);
@@ -138,6 +144,7 @@ static void load_settings(void) {
   if(persist_exists(P_UNIT)) s_unit = persist_read_int(P_UNIT);
   if(persist_exists(P_THEME)) s_theme = persist_read_int(P_THEME);
   if(persist_exists(P_POLL)) s_poll = persist_read_int(P_POLL);
+  if(persist_exists(P_CMODE)) s_compass_mode = persist_read_int(P_CMODE);
   if(persist_exists(P_LOC_CNT)) {
     s_loc_count = persist_read_int(P_LOC_CNT);
     for(int i=0; i<s_loc_count && i<MAX_LOCS; i++) {
@@ -152,6 +159,24 @@ static void load_settings(void) {
 // ============================================================================
 // DRAWING HELPERS
 // ============================================================================
+
+// Draw heading indicator triangle (points inward at edge of ring)
+static void draw_heading_indicator(GContext *ctx, int cx, int cy, int ring_r, float heading, GColor color) {
+  // Triangle pointing inward at the heading angle (top of watch = heading direction)
+  float a = heading;  // heading direction on the fixed ring
+  int tip_x = cx + (int)((ring_r - 14) * psin(a));
+  int tip_y = cy - (int)((ring_r - 14) * pcos(a));
+  int base1_x = cx + (int)((ring_r - 2) * psin(a - 6));
+  int base1_y = cy - (int)((ring_r - 2) * pcos(a - 6));
+  int base2_x = cx + (int)((ring_r - 2) * psin(a + 6));
+  int base2_y = cy - (int)((ring_r - 2) * pcos(a + 6));
+
+  graphics_context_set_fill_color(ctx, color);
+  GPoint tri[] = {GPoint(tip_x,tip_y), GPoint(base1_x,base1_y), GPoint(base2_x,base2_y)};
+  GPath *path = gpath_create(&(GPathInfo){.num_points=3, .points=(GPoint*)tri});
+  gpath_draw_filled(ctx, path);
+  gpath_destroy(path);
+}
 
 // Draw compass needle pointing at bearing
 static void draw_needle(GContext *ctx, int cx, int cy, int len, float angle, GColor color) {
@@ -316,9 +341,12 @@ static void draw_classic(GContext *ctx, GRect b, float dest_bearing, float dist_
   graphics_context_set_stroke_width(ctx, 1);
   graphics_draw_circle(ctx, GPoint(cx,cy), r-4);
 
+  // Rotation offset: traditional subtracts heading, north-up keeps fixed
+  float rot = (s_compass_mode == COMPASS_NORTHUP) ? 0 : -s_heading;
+
   // Degree ticks
   for(int d=0; d<360; d+=10) {
-    float a = d - s_heading;
+    float a = d + rot;
     int inner = (d%90==0) ? r-14 : (d%30==0) ? r-10 : r-6;
     int x1 = cx + (int)(inner * psin(a));
     int y1 = cy - (int)(inner * pcos(a));
@@ -333,7 +361,7 @@ static void draw_classic(GContext *ctx, GRect b, float dest_bearing, float dist_
   const char *dirs[] = {"N","E","S","W"};
   float dir_az[] = {0,90,180,270};
   for(int i=0; i<4; i++) {
-    float a = dir_az[i] - s_heading;
+    float a = dir_az[i] + rot;
     int dx = cx + (int)((r-24) * psin(a));
     int dy = cy - (int)((r-24) * pcos(a));
     #ifdef PBL_COLOR
@@ -345,9 +373,18 @@ static void draw_classic(GContext *ctx, GRect b, float dest_bearing, float dist_
       GRect(dx-10,dy-14,20,28), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 
+  // Heading indicator (north-up mode: shows which way you're facing)
+  if(s_compass_mode == COMPASS_NORTHUP) {
+    #ifdef PBL_COLOR
+    draw_heading_indicator(ctx, cx, cy, r, s_heading, GColorOrange);
+    #else
+    draw_heading_indicator(ctx, cx, cy, r, s_heading, GColorWhite);
+    #endif
+  }
+
   // Destination needle
   if(has_dest) {
-    float na = dest_bearing - s_heading;
+    float na = (s_compass_mode == COMPASS_NORTHUP) ? dest_bearing : dest_bearing - s_heading;
     #ifdef PBL_COLOR
     draw_needle(ctx, cx, cy, r-32, na, GColorRed);
     #else
@@ -397,10 +434,13 @@ static void draw_tech(GContext *ctx, GRect b, float dest_bearing, float dist_m,
   graphics_context_set_stroke_color(ctx, gc);
   graphics_draw_circle(ctx, GPoint(cx,cy), r);
 
+  // Rotation offset
+  float rot = (s_compass_mode == COMPASS_NORTHUP) ? 0 : -s_heading;
+
   // Degree ticks + numbers (skip labels in corners on rect)
   GFont f_sm = fonts_get_system_font(FONT_KEY_GOTHIC_14);
   for(int d=0; d<360; d+=30) {
-    float a = d - s_heading;
+    float a = d + rot;
     int tx = cx + (int)((r-16) * psin(a));
     int ty = cy - (int)((r-16) * pcos(a));
     // Skip degree labels near corners (where date/time/name/dist go)
@@ -418,9 +458,14 @@ static void draw_tech(GContext *ctx, GRect b, float dest_bearing, float dist_m,
     graphics_draw_line(ctx, GPoint(ix,iy), GPoint(ox,oy));
   }
 
+  // Heading indicator (north-up mode)
+  if(s_compass_mode == COMPASS_NORTHUP) {
+    draw_heading_indicator(ctx, cx, cy, r, s_heading, gc);
+  }
+
   // Bearing line to destination
   if(has_dest) {
-    float a = dest_bearing - s_heading;
+    float a = (s_compass_mode == COMPASS_NORTHUP) ? dest_bearing : dest_bearing - s_heading;
     int tx = cx + (int)((r-4) * psin(a));
     int ty = cy - (int)((r-4) * pcos(a));
     graphics_context_set_stroke_color(ctx, gc);
@@ -467,7 +512,7 @@ static void draw_premium(GContext *ctx, GRect b, float dest_bearing, float dist_
       GRect(cx-bw/2, cy-bh/2, bw, bh));
   }
 
-  // Degree ticks (rotate with heading)
+  // Degree ticks (rotate with heading in traditional, fixed in north-up)
   #ifdef PBL_COLOR
   GColor gold = GColorFromHEX(0xCCAA66);
   GColor gold_dk = GColorFromHEX(0x886622);
@@ -476,9 +521,11 @@ static void draw_premium(GContext *ctx, GRect b, float dest_bearing, float dist_
   GColor gold_dk = GColorLightGray;
   #endif
 
+  float rot = (s_compass_mode == COMPASS_NORTHUP) ? 0 : -s_heading;
+
   graphics_context_set_stroke_width(ctx, 1);
   for(int d=0; d<360; d+=10) {
-    float a = d - s_heading;
+    float a = d + rot;
     int inner = (d%90==0) ? r-16 : (d%30==0) ? r-12 : r-8;
     int x1 = cx + (int)(inner * psin(a));
     int y1 = cy - (int)(inner * pcos(a));
@@ -493,7 +540,7 @@ static void draw_premium(GContext *ctx, GRect b, float dest_bearing, float dist_
   const char *dirs[] = {"N","E","S","W"};
   float dir_az[] = {0,90,180,270};
   for(int i=0; i<4; i++) {
-    float a = dir_az[i] - s_heading;
+    float a = dir_az[i] + rot;
     int dx = cx + (int)((r-30) * psin(a));
     int dy = cy - (int)((r-30) * pcos(a));
     #ifdef PBL_COLOR
@@ -510,7 +557,7 @@ static void draw_premium(GContext *ctx, GRect b, float dest_bearing, float dist_
   const char *idirs[] = {"NE","SE","SW","NW"};
   float idir_az[] = {45,135,225,315};
   for(int i=0; i<4; i++) {
-    float a = idir_az[i] - s_heading;
+    float a = idir_az[i] + rot;
     int dx = cx + (int)((r-22) * psin(a));
     int dy = cy - (int)((r-22) * pcos(a));
     graphics_context_set_text_color(ctx, gold_dk);
@@ -518,9 +565,18 @@ static void draw_premium(GContext *ctx, GRect b, float dest_bearing, float dist_
       GRect(dx-10,dy-8,20,16), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 
+  // Heading indicator (north-up mode)
+  if(s_compass_mode == COMPASS_NORTHUP) {
+    #ifdef PBL_COLOR
+    draw_heading_indicator(ctx, cx, cy, r, s_heading, GColorOrange);
+    #else
+    draw_heading_indicator(ctx, cx, cy, r, s_heading, GColorWhite);
+    #endif
+  }
+
   // Destination needle (thick, red with shadow)
   if(has_dest) {
-    float na = dest_bearing - s_heading;
+    float na = (s_compass_mode == COMPASS_NORTHUP) ? dest_bearing : dest_bearing - s_heading;
     // Shadow
     #ifdef PBL_COLOR
     draw_needle(ctx, cx+1, cy+1, r-36, na, GColorFromHEX(0x220000));
@@ -648,13 +704,14 @@ static void inbox_cb(DictionaryIterator *it, void *c) {
   t = dict_find(it, MESSAGE_KEY_GPS_LON);
   if(t) s_gps_lon = (float)t->value->int32;
 
-  // Settings (packed: unit | theme<<2 | poll<<4)
+  // Settings (packed: unit | theme<<2 | poll<<4 | compass_mode<<6)
   t = dict_find(it, MESSAGE_KEY_SETTINGS);
   if(t) {
     int v = (int)t->value->int32;
     s_unit = v & 3;
     s_theme = (v>>2) & 3;
     s_poll = (v>>4) & 3;
+    s_compass_mode = (v>>6) & 1;
   }
 
   // Locations
