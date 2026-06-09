@@ -665,7 +665,12 @@ static void compass_handler(CompassHeadingData heading_data) {
     s_compass_ok = false;
   } else {
     s_compass_ok = true;
-    s_heading = (float)TRIGANGLE_TO_DEG((int)heading_data.magnetic_heading);
+    // magnetic_heading = angle from watch 12-o'clock to north (clockwise)
+    // Convert to actual compass bearing (direction you're facing):
+    float raw = (float)TRIGANGLE_TO_DEG((int)heading_data.magnetic_heading);
+    s_heading = 360.0f - raw;
+    if(s_heading >= 360.0f) s_heading -= 360.0f;
+    if(s_heading < 0) s_heading += 360.0f;
   }
   if(s_canvas) layer_mark_dirty(s_canvas);
 }
