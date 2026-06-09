@@ -51,13 +51,17 @@
                 {
                     "file": "images/compass_face.png",
                     "name": "COMPASS_FACE",
-                    "targetPlatforms": ["gabbro"],
+                    "targetPlatforms": [
+                        "gabbro"
+                    ],
                     "type": "png"
                 },
                 {
                     "file": "images/compass_face_emery.png",
                     "name": "COMPASS_FACE_EMERY",
-                    "targetPlatforms": ["emery"],
+                    "targetPlatforms": [
+                        "emery"
+                    ],
                     "type": "png"
                 }
             ]
@@ -72,5 +76,5 @@
             "watchface": false
         }
     },
-    "version": "1.0.0"
+    "version": "2.1.0"
 }
