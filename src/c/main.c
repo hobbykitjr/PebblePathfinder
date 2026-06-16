@@ -80,26 +80,36 @@ static GBitmap *s_compass_bmp = NULL;
 static float psin(float deg) { return (float)sin_lookup(DEG_TO_TRIGANGLE((int)deg))/(float)TRIG_MAX_RATIO; }
 static float pcos(float deg) { return (float)cos_lookup(DEG_TO_TRIGANGLE((int)deg))/(float)TRIG_MAX_RATIO; }
 
-// Haversine distance in meters
+// Newton's method sqrt — needs good initial guess for small values
+static float my_sqrt(float x) {
+  if(x <= 0) return 0;
+  // Start from 1.0 for values < 1, otherwise start from x
+  float s = (x < 1.0f) ? 1.0f : x;
+  for(int i = 0; i < 15; i++) s = 0.5f * (s + x / s);
+  return s;
+}
+
+// Equirectangular distance in meters (good for < 100km)
 static float haversine(float lat1, float lon1, float lat2, float lon2) {
   float dlat = (lat2-lat1) * PI_F / 180.0f;
   float dlon = (lon2-lon1) * PI_F / 180.0f;
-  // Equirectangular approximation (good enough for walking distances)
-  float x = dlon * pcos((lat1+lat2)/2);
+  float x = dlon * pcos((lat1+lat2)/2.0f);
   float y = dlat;
-  float d_rad = x*x + y*y;
-  // sqrt approximation
-  float s = d_rad > 0 ? d_rad : 0.0001f;
-  s = 0.5f*(s + d_rad/s); s = 0.5f*(s + d_rad/s); s = 0.5f*(s + d_rad/s);
-  return s * 6371000.0f;  // Earth radius in meters
+  return my_sqrt(x*x + y*y) * 6371000.0f;
 }
 
-// Bearing from point 1 to point 2 in degrees
+// Bearing from point 1 to point 2 in degrees (equirectangular)
 static float bearing(float lat1, float lon1, float lat2, float lon2) {
-  float dlon = lon2 - lon1;
-  float y = psin(dlon) * pcos(lat2);
-  float x = pcos(lat1)*psin(lat2) - psin(lat1)*pcos(lat2)*pcos(dlon);
-  int32_t angle = atan2_lookup((int)(y*TRIG_MAX_RATIO), (int)(x*TRIG_MAX_RATIO));
+  float dlat = (lat2-lat1) * PI_F / 180.0f;   // north component
+  float dlon = (lon2-lon1) * PI_F / 180.0f;
+  float east = dlon * pcos((lat1+lat2)/2.0f);  // east component
+  float north = dlat;
+  // Normalize to fill int16 range for atan2_lookup precision
+  float mag = my_sqrt(east*east + north*north);
+  float scale = (mag > 0) ? (30000.0f / mag) : 1.0f;
+  int16_t ey = (int16_t)(east * scale);
+  int16_t nx = (int16_t)(north * scale);
+  int32_t angle = atan2_lookup(ey, nx);
   float deg = (float)angle * 360.0f / (float)TRIG_MAX_ANGLE;
   if(deg < 0) deg += 360;
   return deg;
